@@ -166,11 +166,36 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 2. 接入真实埋点平台（Firebase / 自建），把 `TelemetryStore` 换成上报实现即可，界面代码不用动
 3. 若要做订阅：先验证「一次性需求」还是「高频需求」，这直接决定商业模式
 4. `AppConfig` 里的假设与及格线建议直接写进 PRD，作为这一版的需求验收标准
-5. 上架前补齐：签名配置、隐私政策、R8 混淆规则、多分辨率图标（当前为 AS 默认图标）
+5. 上架前补齐：签名配置、隐私政策、R8 混淆规则
 
 ---
 
-## 9. 真机验证记录
+## 9. 应用图标
+
+已替换掉 Android Studio 默认图标，完整设计规范见 **[`design/icon/ICON-SPEC.md`](design/icon/ICON-SPEC.md)**。
+
+**概念**：「一页发票，就是一张图」—— 白色纸张 + 右上折角 = PDF 文档；页内两条文字条 = 原有文字内容；
+远山 / 近山 / 太阳 = 转换出来的图片。三笔说清产品，且不放文字、不放箭头。
+
+**结构**：标准自适应图标三层（背景渐变 / 前景图形 / 单色剪影），加 legacy 位图与 Play 上架图。
+
+| 资产 | 位置 |
+|---|---|
+| 矢量三层 | `res/drawable/ic_launcher_{background,foreground,monochrome}.xml` |
+| 自适应入口 | `res/mipmap-anydpi-v26/ic_launcher{,_round}.xml` |
+| Legacy 方/圆 | `res/mipmap-{mdpi..xxxhdpi}/ic_launcher{,_round}.webp`（48/72/96/144/192） |
+| Play 上架图 | `design/icon/export/ic_launcher_play_512.png`（512×512 满幅直角） |
+| 可复现脚本 | `design/icon/generate_icons.py`（含几何自检 + 超采样渲染） |
+
+**关键取舍**：纸张取 Material Keyline 竖向矩形 37×52 dp（贴近 A4 比例），前景最远点 30.58 dp < 33 dp 安全界；
+legacy 位图**裁中央 72dp** 生成，保证新旧设备图标观感一致，不会在旧机上突然变小。
+
+**已实测**：系统渲染满铺蒙版无白边；圆形蒙版下纸张四角完整；与系统图标并排视觉权重一致。
+桌面上的浅色光环已查明是 Android 16 启动器按图标主色派生的底板（品红对照实验证实），非本图标缺陷。
+
+---
+
+## 10. 真机验证记录
 
 在 Pixel 系统镜像（Android 16 / API 36，1080×2400，模拟器）上完整走查了一遍真实链路，
 截图见 `docs/screenshots/`。
@@ -218,7 +243,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - 测试用的 PDF 是我用 Helvetica 生成的，**中文字符在 PDF 里本身就被替换成了 `?`**，
   所以渲染结果也是 `?` —— 这说明渲染是忠实的，不是我们渲染错了。
   真实电子发票都会内嵌字体，请用**团队自己的真实发票**再走一遍确认中文清晰度。
-- 未做：多分辨率启动图标（当前仍是 Android Studio 默认图标）、release 签名配置、R8 混淆规则。
+- 未做：release 签名配置、R8 混淆规则。（多分辨率启动图标已完成，见第 9 节）
 
 ---
 
