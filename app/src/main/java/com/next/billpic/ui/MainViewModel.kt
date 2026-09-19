@@ -6,23 +6,25 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.next.billpic.BuildConfig
 import com.next.billpic.R
-import com.next.billpic.core.data.TelemetryStore
+import com.next.billpic.core.data.Telemetry
+import com.next.billpic.core.data.TelemetryProvider
+import com.next.billpic.core.data.UserDataStore
 import com.next.billpic.core.io.PickedFile
 import com.next.billpic.core.media.MediaSaver
 import com.next.billpic.core.model.AppConfig
 import com.next.billpic.core.model.ConversionRecord
 import com.next.billpic.core.model.ConvertedPage
-import com.next.billpic.core.model.FeedbackEntry
 import com.next.billpic.core.model.OutputFormat
 import com.next.billpic.core.model.OutputScale
+import com.next.billpic.core.model.PageRange
 import com.next.billpic.core.model.PdfSource
 import com.next.billpic.core.model.TelemetrySnapshot
-import com.next.billpic.core.model.TrackedEvent
-import com.next.billpic.core.model.TrialSession
-import com.next.billpic.core.model.ValidationCalculator
 import com.next.billpic.core.pdf.PdfConversionException
 import com.next.billpic.core.pdf.PdfConverter
 import kotlinx.coroutines.CancellationException
@@ -32,9 +34,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /** 底部 Tab。刻意只有三个，超过 5 个会让主导航变糊。 */
@@ -45,7 +47,7 @@ enum class AppTab(val label: String, val iconRes: Int) {
 }
 
 /** 「我的」下的二级页面 */
-enum class MineSub { NONE, PRIVACY, VALIDATION }
+enum class MineSub { NONE, PRIVACY, POLICY, TERMS, FAQ, ABOUT, VALIDATION }
 
 /** 界面状态。单一数据源，所有交互都通过 ViewModel 改这里。 */
 data class MainUiState(
@@ -53,8 +55,12 @@ data class MainUiState(
     val showResult: Boolean = false,
     val mineSub: MineSub = MineSub.NONE,
     val format: OutputFormat = OutputFormat.JPG,
-    val scale: OutputScale = OutputScale.HIGH,
+    val scale: OutputScale = OutputScale.STANDARD,
     val source: PdfSource? = null,
+    val pageRangeInput: String = "",
+    val pageRangeError: String? = null,
+    val pageRangeTruncated: Boolean = false,
+    val selectedPages: List<Int> = emptyList(),
     val parsing: Boolean = false,
     val converting: Boolean = false,
     val progressDone: Int = 0,
@@ -66,20 +72,48 @@ data class MainUiState(
     val viewerPage: Int? = null,
     val feedbackOpen: Boolean = false,
     val hud: String? = null,
-    val variant: String = AppConfig.AB_VARIANTS.first(),
+    val variant: String = AppConfig.RELEASE_CTA,
     val history: List<ConversionRecord> = emptyList(),
     val telemetry: TelemetrySnapshot = TelemetrySnapshot(),
-    val shareRequest: Intent? = null,
+    val permissionGuideVisible: Boolean = false,
+    val clearHistoryVisible: Boolean = false,
+    val deleteRecordIndex: Int? = null,
+    /** 上次转换所用的设置指纹，用来判断改了设置后要不要给「重新转换」出口 */
+    val lastSignature: String = "",
 ) {
     val panelEnabled: Boolean get() = AppConfig.VALIDATION_PANEL_ENABLED
+
     val progress: Float
         get() = if (progressTotal <= 0) 0f else progressDone.toFloat() / progressTotal.toFloat()
+
+    /** 结果页是否还能「换一份发票」——正在转换时不该让用户重复点。 */
+    val canPickAnother: Boolean get() = !converting && !parsing
+
+    /** 当前输出设置的指纹 */
+    val currentSignature: String
+        get() = format.id + "|" + scale.id + "|" + selectedPages.joinToString(",")
+
+    /**
+     * 是否该给用户一个「重新转换」的出口。
+     *
+     * 选好文件是自动开转的（少一步操作），但用户随后改了页码范围或输出档位时，
+     * 必须有个地方让他把新设置跑一遍——否则设置改了却不生效，是个死胡同。
+     */
+    val settingsDirty: Boolean
+        get() = source != null && !converting && !parsing && currentSignature != lastSignature
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val store = TelemetryStore(application)
-    private var snapshot: TelemetrySnapshot = store.load()
+    /** 用户自己的数据（上架包也有） */
+    private val userData = UserDataStore(application)
+
+    /**
+     * 走查采集。debug 是真实现，release 是空对象——
+     * 这里看不出区别，差异在构建期就决定了。
+     */
+    private val telemetry: Telemetry = TelemetryProvider.create(application)
+
     private var stagedFile: File? = null
 
     private val _state = MutableStateFlow(MainUiState())
@@ -88,43 +122,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var convertJob: Job? = null
 
     init {
-        val session = snapshot.currentSession ?: createSession()
+        val user = userData.load()
+        val variant = telemetry.ensureSession()
         _state.value = _state.value.copy(
-            variant = session.variant,
-            format = OutputFormat.fromId(snapshot.preferredFormatId),
-            scale = OutputScale.fromId(snapshot.preferredScaleId),
-            history = snapshot.history,
-            telemetry = snapshot,
+            variant = variant,
+            format = OutputFormat.fromId(user.preferredFormatId),
+            scale = OutputScale.fromId(user.preferredScaleId),
+            history = user.history,
+            telemetry = telemetry.snapshot(),
         )
-        track("session_start", mapOf("variant" to session.variant, "engine" to "pdfrenderer"))
+        track("session_start", mapOf("variant" to variant, "engine" to "pdfrenderer"))
     }
 
     /* ------------------------------ 埋点 ------------------------------ */
 
+    /**
+     * 事件入口。
+     *
+     * 第一行的常量判断不是「防呆」而是**给 R8 看的**：
+     * release 里 `BuildConfig.VALIDATION_PANEL` 是编译期常量 false，
+     * R8 会把它折叠成空函数、内联掉所有调用点，于是连事件名字符串
+     * （"conversion_start" 之类）都不会留在 dex 里。
+     * 没有这行时，字符串会作为 no-op 调用的参数被保留下来——
+     * 行为上无害，但反编译能看到，不利于「不含埋点」这个结论。
+     */
     private fun track(name: String, props: Map<String, String> = emptyMap()) {
-        val sessionId = snapshot.currentSessionId ?: return
-        val event = TrackedEvent(
-            timestamp = System.currentTimeMillis(),
-            name = name,
-            screen = currentScreenId(),
-            props = props,
-        )
-        snapshot = snapshot.copy(
-            sessions = snapshot.sessions.map { session ->
-                if (session.id == sessionId) session.copy(events = session.events + event) else session
-            },
-        )
-        store.save(snapshot)
-        _state.value = _state.value.copy(telemetry = snapshot)
+        if (!BuildConfig.VALIDATION_PANEL) return
+        telemetry.track(name, currentScreenId(), props)
+        val snapshot = telemetry.snapshot()
+        if (snapshot !== _state.value.telemetry) {
+            _state.value = _state.value.copy(telemetry = snapshot)
+        }
     }
 
     private fun currentScreenId(): String {
         val current = _state.value
         return when {
-            current.viewerPage != null -> "view-viewer"
+            current.viewerPage != null -> "view-result"
             current.showResult -> "view-result"
-            current.mineSub == MineSub.PRIVACY -> "view-privacy"
-            current.mineSub == MineSub.VALIDATION -> "view-panel"
+            current.mineSub == MineSub.PRIVACY -> "view-mine"
+            current.mineSub == MineSub.POLICY -> "view-mine"
+            current.mineSub == MineSub.TERMS -> "view-mine"
+            current.mineSub == MineSub.FAQ -> "view-mine"
+            current.mineSub == MineSub.ABOUT -> "view-mine"
+            current.mineSub == MineSub.VALIDATION -> "view-mine"
             current.tab == AppTab.RECORDS -> "view-records"
             current.tab == AppTab.MINE -> "view-mine"
             else -> "view-home"
@@ -139,27 +180,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_state.value.hud != null) _state.value = _state.value.copy(hud = null)
     }
 
-    fun consumeShareRequest() {
-        if (_state.value.shareRequest != null) _state.value = _state.value.copy(shareRequest = null)
-    }
+    /* ------------------------------ 外部跳转 ------------------------------ */
 
-    /** Android 9 及以下拒绝存储权限时的提示 */
-    fun storagePermissionDenied() {
-        hud("没有存储权限，无法写入相册，请在系统设置里允许后重试")
-    }
-
-    private fun createSession(): TrialSession {
-        val id = "s" + System.currentTimeMillis().toString(36) + (100..999).random()
-        val session = TrialSession(
-            id = id,
-            startedAt = System.currentTimeMillis(),
-            variant = AppConfig.assignVariant(id),
-        )
-        snapshot = snapshot.copy(
-            sessions = snapshot.sessions + session,
-            currentSessionId = id,
-        )
-        return session
+    /**
+     * 启动外部 Activity。
+     *
+     * 刻意用 try/catch 而不是 `resolveActivity`：Android 11 起应用可见性受限，
+     * 没在 `<queries>` 里声明的 intent 用 resolveActivity 会误判为「无应用可处理」，
+     * 直接 startActivity 让系统判定更可靠。
+     */
+    private fun launchExternal(intent: Intent, failureMessage: String) {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { getApplication<Application>().startActivity(intent) }
+            .onFailure { hud(failureMessage) }
     }
 
     /* ------------------------------ 导航 ------------------------------ */
@@ -173,7 +206,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun goToResult() {
         if (_state.value.results.isEmpty()) return
         track("go_result")
-        _state.value = _state.value.copy(tab = AppTab.CONVERT, showResult = true, mineSub = MineSub.NONE)
+        _state.value = _state.value.copy(
+            tab = AppTab.CONVERT,
+            showResult = true,
+            mineSub = MineSub.NONE,
+        )
     }
 
     fun closeResult() {
@@ -184,6 +221,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun handleBack(): Boolean {
         val current = _state.value
         return when {
+            current.permissionGuideVisible -> {
+                dismissPermissionGuide()
+                true
+            }
+            current.clearHistoryVisible -> {
+                dismissClearHistory()
+                true
+            }
+            current.deleteRecordIndex != null -> {
+                dismissDeleteRecord()
+                true
+            }
             current.viewerPage != null -> {
                 closeViewer()
                 true
@@ -208,9 +257,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /* ------------------------------ 我的：二级页面 ------------------------------ */
+
     fun openPrivacy() {
         track("privacy_open")
         _state.value = _state.value.copy(tab = AppTab.MINE, mineSub = MineSub.PRIVACY)
+    }
+
+    fun openPolicy() {
+        track("policy_open")
+        _state.value = _state.value.copy(tab = AppTab.MINE, mineSub = MineSub.POLICY)
+    }
+
+    fun openTerms() {
+        track("terms_open")
+        _state.value = _state.value.copy(tab = AppTab.MINE, mineSub = MineSub.TERMS)
+    }
+
+    fun openFaq() {
+        track("faq_open")
+        _state.value = _state.value.copy(tab = AppTab.MINE, mineSub = MineSub.FAQ)
+    }
+
+    fun openAbout() {
+        track("about_open")
+        _state.value = _state.value.copy(tab = AppTab.MINE, mineSub = MineSub.ABOUT)
     }
 
     fun openValidationPanel() {
@@ -222,14 +293,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = _state.value.copy(tab = AppTab.MINE, mineSub = MineSub.NONE)
     }
 
-    fun showAbout() {
-        track("about_open")
-        hud("这是验证用原型，按真实习惯使用即可")
+    /** 打开备案系统网站，供用户按备案编号核查。 */
+    fun openBeianPage() {
+        launchExternal(
+            Intent(Intent.ACTION_VIEW, Uri.parse(AppConfig.ICP_BEIAN_URL)),
+            "没有可用的浏览器",
+        )
     }
 
-    fun recordTap() {
-        track("record_tap")
-        hud("图片在系统相册里，这里只保留转换记录")
+    /** 打开系统「应用详情」页，用户可在那里重新授予权限。 */
+    fun openAppSettings() {
+        val intent = Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", getApplication<Application>().packageName, null),
+        )
+        launchExternal(intent, "打不开系统设置，请手动到「设置 → 应用」里开启存储权限")
     }
 
     /* ------------------------------ 选文件 ------------------------------ */
@@ -244,7 +322,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val name = PickedFile.displayName(context, uri)
 
         if (!PickedFile.isPdf(context, uri, name)) {
-            track("file_reject", mapOf("ext" to name.substringAfterLast('.', "").lowercase(Locale.ROOT)))
+            track(
+                "file_reject",
+                mapOf("ext" to name.substringAfterLast('.', "").lowercase(Locale.ROOT)),
+            )
             hud("这不是 PDF 文件，请选择 .pdf 发票")
             return
         }
@@ -259,6 +340,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             showResult = false,
             lastDurationMs = 0L,
             lastTotalBytes = 0L,
+            pageRangeInput = "",
+            pageRangeError = null,
+            pageRangeTruncated = false,
+            selectedPages = emptyList(),
         )
 
         viewModelScope.launch {
@@ -266,6 +351,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val staged = PickedFile.stagePdf(context, uri, name)
                 val pageCount = PdfConverter.pageCount(staged)
                 stagedFile = staged
+                val allPages = (1..pageCount).take(AppConfig.MAX_PAGES)
                 _state.value = _state.value.copy(
                     parsing = false,
                     source = PdfSource(
@@ -274,6 +360,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         sizeBytes = staged.length(),
                         pageCount = pageCount,
                     ),
+                    selectedPages = allPages,
+                    pageRangeTruncated = pageCount > AppConfig.MAX_PAGES,
                 )
                 track("file_parsed", mapOf("pages" to pageCount.toString()))
                 // 移动端少一步操作：选好文件直接开转，与原型一致
@@ -290,6 +378,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** 结果页「换一份发票」与首页「移除」共用。 */
     fun clearFile() {
         track("file_clear")
         stagedFile = null
@@ -300,6 +389,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             showResult = false,
             lastDurationMs = 0L,
             lastTotalBytes = 0L,
+            pageRangeInput = "",
+            pageRangeError = null,
+            pageRangeTruncated = false,
+            selectedPages = emptyList(),
+            tab = AppTab.CONVERT,
+            lastSignature = "",
         )
     }
 
@@ -308,17 +403,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setFormat(format: OutputFormat) {
         if (_state.value.format == format) return
         track("format_select", mapOf("format" to format.id))
-        snapshot = snapshot.copy(preferredFormatId = format.id)
-        store.save(snapshot)
+        userData.save(userData.load().copy(preferredFormatId = format.id))
         _state.value = _state.value.copy(format = format)
     }
 
     fun setScale(scale: OutputScale) {
         if (_state.value.scale == scale) return
         track("scale_select", mapOf("scale" to scale.id))
-        snapshot = snapshot.copy(preferredScaleId = scale.id)
-        store.save(snapshot)
+        userData.save(userData.load().copy(preferredScaleId = scale.id))
         _state.value = _state.value.copy(scale = scale)
+    }
+
+    /**
+     * 页码范围输入。
+     *
+     * 边输边校验：失败时把原因写在输入框下方，而不是等用户点了转换才告诉他。
+     * 输入非法时 `selectedPages` 置空，[convertNow] 据此拦住转换。
+     */
+    fun setPageRange(input: String) {
+        val source = _state.value.source ?: return
+        when (val result = PageRange.parse(input, source.pageCount)) {
+            is PageRange.Result.Success -> _state.value = _state.value.copy(
+                pageRangeInput = input,
+                pageRangeError = null,
+                pageRangeTruncated = result.truncated,
+                selectedPages = result.pages,
+            )
+
+            is PageRange.Result.Failure -> _state.value = _state.value.copy(
+                pageRangeInput = input,
+                pageRangeError = result.message,
+                pageRangeTruncated = false,
+                selectedPages = emptyList(),
+            )
+        }
     }
 
     /* ------------------------------ 转换 ------------------------------ */
@@ -327,6 +445,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val current = _state.value
         val source = current.source ?: return
         if (current.converting) return
+
+        if (current.selectedPages.isEmpty()) {
+            hud(current.pageRangeError ?: "请先确认要转换的页码")
+            return
+        }
+
         val file = stagedFile
         if (file == null || !file.exists()) {
             hud("文件已失效，请重新选择发票")
@@ -335,10 +459,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         val format = current.format
         val scale = current.scale
+        val pages = current.selectedPages
         _state.value = current.copy(
             converting = true,
             progressDone = 0,
-            progressTotal = 1,
+            progressTotal = pages.size,
             showResult = false,
         )
         track(
@@ -347,59 +472,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 "format" to format.id,
                 "scale" to scale.id,
                 "size_kb" to (source.sizeBytes / 1024).toString(),
+                "selected_pages" to pages.size.toString(),
             ),
         )
 
         convertJob = viewModelScope.launch {
             val startedAt = System.currentTimeMillis()
             try {
-                val pages = PdfConverter.convert(
+                val converted = PdfConverter.convert(
                     file = file,
                     displayName = source.displayName,
                     format = format,
                     scale = scale,
+                    pageIndices = pages,
                     onProgress = { done, total ->
                         _state.value = _state.value.copy(progressDone = done, progressTotal = total)
                     },
                 )
-                if (pages.isEmpty()) throw PdfConversionException("一页都没渲染出来，换一个文件试试")
+                if (converted.isEmpty()) throw PdfConversionException("一页都没渲染出来，换一个文件试试")
 
                 val duration = System.currentTimeMillis() - startedAt
-                val totalBytes = pages.sumOf { it.bytes.size.toLong() }
+                val totalBytes = converted.sumOf { it.bytes.size.toLong() }
                 val record = ConversionRecord(
                     timestamp = System.currentTimeMillis(),
                     fileName = source.displayName,
-                    pages = pages.size,
+                    pages = converted.size,
                     formatId = format.id,
                     scaleValue = scale.value,
                     totalBytes = totalBytes,
                     durationMs = duration,
                 )
-                snapshot = snapshot.copy(history = (listOf(record) + snapshot.history).take(50))
-                store.save(snapshot)
+                val updatedUser = userData.appendRecord(record)
 
                 _state.value = _state.value.copy(
-                    results = pages,
+                    results = converted,
                     lastDurationMs = duration,
                     lastTotalBytes = totalBytes,
                     showResult = true,
                     tab = AppTab.CONVERT,
                     mineSub = MineSub.NONE,
-                    history = snapshot.history,
+                    history = updatedUser.history,
+                    lastSignature = format.id + "|" + scale.id + "|" +
+                        pages.joinToString(","),
                 )
 
                 track(
                     "conversion_done",
                     mapOf(
-                        "pages" to pages.size.toString(),
+                        "pages" to converted.size.toString(),
                         "format" to format.id,
                         "scale" to scale.id,
                         "ms" to duration.toString(),
                         "out_kb" to (totalBytes / 1024).toString(),
                     ),
                 )
-                track("flow_complete", mapOf("pages" to pages.size.toString(), "format" to format.id))
-                hud("${pages.size} 张图片已生成")
+                track("flow_complete", mapOf("pages" to converted.size.toString(), "format" to format.id))
+                hud("${converted.size} 张图片已生成")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -478,8 +606,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             hud("还没有可分享的图片")
             return
         }
-        val pages = current.results
-        val format = current.format
+        sharePages(current.results, current.format)
+    }
+
+    /** 单页分享：一页发票要单独发给同事时不必把整份都发出去。 */
+    fun shareOne(page: Int) {
+        val current = _state.value
+        val target = current.results.firstOrNull { it.page == page } ?: return
+        sharePages(listOf(target), current.format)
+    }
+
+    private fun sharePages(pages: List<ConvertedPage>, format: OutputFormat) {
         viewModelScope.launch {
             val uris = runCatching { MediaSaver.shareUris(getApplication(), pages) }.getOrNull()
             if (uris.isNullOrEmpty()) {
@@ -487,8 +624,86 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             track("share_images", mapOf("pages" to uris.size.toString(), "format" to format.id))
-            _state.value = _state.value.copy(shareRequest = MediaSaver.shareIntent(uris, format))
+            _state.value = _state.value.copy(viewerPage = null)
+            launchExternal(MediaSaver.shareIntent(uris, format), "没有可用的分享应用")
         }
+    }
+
+    /* ------------------------------ 存储权限 ------------------------------ */
+
+    /** Android 9 及以下拒绝存储权限时：给一条能真的走下去的路，而不只是提示。 */
+    fun storagePermissionDenied() {
+        _state.value = _state.value.copy(permissionGuideVisible = true)
+    }
+
+    fun dismissPermissionGuide() {
+        _state.value = _state.value.copy(permissionGuideVisible = false)
+    }
+
+    /** 记录页：图片在系统相册，带用户去能看到图的地方。 */
+    fun openGallery() {
+        track("open_gallery")
+        hud("图片在系统相册的 BillPic 相册里")
+        launchExternal(MediaSaver.openGalleryIntent(), "没有找到可用的相册应用")
+    }
+
+    /* ------------------------------ 记录管理 ------------------------------ */
+
+    fun recordTap(index: Int) {
+        track("record_tap", mapOf("index" to index.toString()))
+        val current = _state.value
+        // 最近一次且结果还在内存里，直接回结果页；否则带用户去相册看原图
+        if (index == 0 && current.results.isNotEmpty()) {
+            goToResult()
+        } else {
+            openGallery()
+        }
+    }
+
+    fun requestDeleteRecord(index: Int) {
+        if (index !in _state.value.history.indices) return
+        _state.value = _state.value.copy(deleteRecordIndex = index)
+    }
+
+    fun dismissDeleteRecord() {
+        _state.value = _state.value.copy(deleteRecordIndex = null)
+    }
+
+    fun confirmDeleteRecord() {
+        val index = _state.value.deleteRecordIndex ?: return
+        val updated = userData.removeRecordAt(index)
+        _state.value = _state.value.copy(
+            history = updated.history,
+            deleteRecordIndex = null,
+        )
+        hud("已删除这条记录")
+    }
+
+    /* ------------------------------ 数据控制权 ------------------------------ */
+
+    fun requestClearHistory() {
+        _state.value = _state.value.copy(clearHistoryVisible = true)
+    }
+
+    fun dismissClearHistory() {
+        _state.value = _state.value.copy(clearHistoryVisible = false)
+    }
+
+    /**
+     * 清除转换记录。
+     *
+     * 这是用户对自己数据的控制权入口——上一版只有一个藏在验证看板里、
+     * 文案叫「清空走查数据」的按钮，等于用户没有任何途径清掉自己的记录。
+     * 记录里含发票文件名，属个人信息，这个入口是合规必需项。
+     */
+    fun confirmClearHistory() {
+        val updated = userData.clearHistory()
+        _state.value = _state.value.copy(
+            history = updated.history,
+            clearHistoryVisible = false,
+        )
+        track("history_clear")
+        hud("转换记录已清空，相册里的图片不受影响")
     }
 
     /* ------------------------------ 反馈 ------------------------------ */
@@ -515,43 +730,63 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun submitFeedback(rating: Int, text: String, intent: String): Boolean {
         if (rating <= 0) return false
         val current = _state.value
-        val converted = current.results.isNotEmpty()
-        val sessionId = snapshot.currentSessionId
-        val entry = FeedbackEntry(
-            timestamp = System.currentTimeMillis(),
+        telemetry.recordFeedback(
             rating = rating,
-            text = text.trim(),
+            text = text,
             intent = intent,
-            converted = converted,
+            converted = current.results.isNotEmpty(),
             formatId = current.format.id,
             pages = current.source?.pageCount ?: 0,
         )
-        snapshot = snapshot.copy(
-            sessions = snapshot.sessions.map { session ->
-                if (session.id == sessionId) session.copy(feedback = session.feedback + entry) else session
-            },
+        _state.value = _state.value.copy(
+            feedbackOpen = false,
+            telemetry = telemetry.snapshot(),
         )
-        store.save(snapshot)
-        _state.value = _state.value.copy(feedbackOpen = false, telemetry = snapshot)
-
         track(
             "feedback_submit",
             mapOf(
                 "rating" to rating.toString(),
                 "has_text" to text.isNotBlank().toString(),
                 "intent" to intent,
-                "converted" to converted.toString(),
+                "converted" to current.results.isNotEmpty().toString(),
             ),
         )
         hud("反馈已记录，感谢！")
         return true
     }
 
+    /* ------------------------------ 意见反馈（上架通道） ------------------------------ */
+
+    /**
+     * 给真实用户的反馈通道。
+     *
+     * 与走查期的星级打分是两回事：前者是把意见送出去，后者是把结论留在本机。
+     * 邮箱未配置时明确提示，不假装成功。
+     */
+    fun openFeedbackEmail() {
+        track("feedback_email_open")
+        val email = AppConfig.CONTACT_EMAIL
+        if (AppConfig.isPlaceholder(email)) {
+            hud("反馈邮箱还没配置，请开发同学填写 AppConfig.CONTACT_EMAIL")
+            return
+        }
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("mailto:$email")
+            putExtra(Intent.EXTRA_SUBJECT, "BillPic 使用反馈（v${AppConfig.VERSION_NAME}）")
+            putExtra(
+                Intent.EXTRA_TEXT,
+                "\n\n——\n设备：${Build.MANUFACTURER} ${Build.MODEL}\n" +
+                    "系统：Android ${Build.VERSION.RELEASE}\n" +
+                    "版本：${AppConfig.VERSION_NAME}",
+            )
+        }
+        launchExternal(intent, "没有可用的邮件应用，可直接发到 $email")
+    }
+
     /* ------------------------------ 走查数据 ------------------------------ */
 
     fun startNewTrialSession() {
-        val session = createSession()
-        store.save(snapshot)
+        val variant = telemetry.startNewSession()
         stagedFile = null
         viewModelScope.launch { PickedFile.clearStaged(getApplication()) }
         _state.value = _state.value.copy(
@@ -559,6 +794,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             showResult = false,
             mineSub = MineSub.NONE,
             source = null,
+            pageRangeInput = "",
+            pageRangeError = null,
+            pageRangeTruncated = false,
+            selectedPages = emptyList(),
             results = emptyList(),
             lastDurationMs = 0L,
             lastTotalBytes = 0L,
@@ -567,32 +806,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             progressTotal = 0,
             viewerPage = null,
             feedbackOpen = false,
-            variant = session.variant,
-            history = snapshot.history,
-            telemetry = snapshot,
+            variant = variant,
+            telemetry = telemetry.snapshot(),
+            lastSignature = "",
         )
-        track("session_start", mapOf("variant" to session.variant, "engine" to "pdfrenderer"))
+        track("session_start", mapOf("variant" to variant, "engine" to "pdfrenderer"))
         hud("已开始新的试用会话，请交给下一位同事")
     }
 
+    /** 清空全部走查数据（验证看板专用）。用户数据请用 [confirmClearHistory]。 */
     fun resetAllData() {
-        store.clear()
-        snapshot = TelemetrySnapshot()
-        val session = createSession()
-        store.save(snapshot)
+        telemetry.reset()
+        userData.clear()
+        val variant = telemetry.startNewSession()
         stagedFile = null
         viewModelScope.launch { PickedFile.clearStaged(getApplication()) }
         _state.value = MainUiState(
-            variant = session.variant,
+            variant = variant,
             history = emptyList(),
-            telemetry = snapshot,
+            telemetry = telemetry.snapshot(),
         )
-        track("session_start", mapOf("variant" to session.variant, "engine" to "pdfrenderer"))
+        track("session_start", mapOf("variant" to variant, "engine" to "pdfrenderer"))
         hud("已清空全部走查数据")
     }
 
     fun exportJson() {
-        val payload = buildExportJson()
+        val payload = telemetry.exportJson()
+        if (payload.isBlank()) return
         val fileName = "billpic-android-testdata-" + System.currentTimeMillis() + ".json"
         viewModelScope.launch {
             val uri = runCatching {
@@ -603,117 +843,80 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             track("data_export")
-            _state.value = _state.value.copy(
-                shareRequest = MediaSaver.exportShareIntent(uri, fileName),
+            launchExternal(
+                MediaSaver.exportShareIntent(uri, fileName, "application/json", "导出走查数据"),
+                "没有可用的分享应用",
             )
         }
     }
 
     fun copySummary() {
+        val summary = telemetry.summaryText()
+        if (summary.isBlank()) return
         val context = getApplication<Application>()
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-        clipboard?.setPrimaryClip(ClipData.newPlainText("BillPic 走查摘要", buildSummaryText()))
+        clipboard?.setPrimaryClip(ClipData.newPlainText("BillPic 走查摘要", summary))
         track("summary_copy")
         hud("走查摘要已复制")
     }
 
-    private fun buildSummaryText(): String {
-        val metrics = ValidationCalculator.compute(snapshot)
-        val feedback = snapshot.sessions.flatMap { it.feedback }.sortedBy { it.timestamp }
-        val lines = mutableListOf(
-            "【BillPic Android】原型走查摘要",
-            "试用会话：${metrics.totalSessions}",
-            "成功拿到图片：${metrics.completedSessions}（完成率 " +
-                "${(metrics.completionRate * 100).toInt()}%）",
-            "平均转换耗时：" + if (metrics.averageDurationMs > 0) {
-                String.format(Locale.CHINA, "%.2f 秒", metrics.averageDurationMs / 1000.0)
+    /* ------------------------------ 诊断信息 ------------------------------ */
+
+    /**
+     * 导出诊断信息。
+     *
+     * 在没有联网权限的前提下，这是排查用户问题的唯一可靠路径：
+     * **由用户主动发起**，内容只有设备环境 + 他自己的转换记录（本来就看得到）。
+     * 不做任何被动采集，因此不违背「不联网」的承诺。
+     */
+    fun exportDiagnostics() {
+        val current = _state.value
+        val context = getApplication<Application>()
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA)
+
+        val text = buildString {
+            appendLine("BillPic 诊断信息")
+            appendLine("生成时间：${stamp.format(Date())}")
+            appendLine()
+            appendLine("【应用】")
+            appendLine("名称：${AppConfig.APP_NAME}")
+            appendLine("版本：${AppConfig.VERSION_NAME}（versionCode ${BuildConfig.VERSION_CODE}）")
+            appendLine("转换引擎：Android PdfRenderer（本机渲染，无联网权限）")
+            appendLine()
+            appendLine("【设备】")
+            appendLine("厂商型号：${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("系统版本：Android ${Build.VERSION.RELEASE}（API ${Build.VERSION.SDK_INT}）")
+            appendLine("系统架构：${Build.SUPPORTED_ABIS.joinToString(", ")}")
+            appendLine()
+            appendLine("【当前输出设置】")
+            appendLine("格式：${current.format.label}")
+            appendLine("档位：${current.scale.label}（${current.scale.value}x / 质量 ${current.scale.jpegQuality}）")
+            appendLine()
+            appendLine("【最近转换记录】共 ${current.history.size} 条")
+            if (current.history.isEmpty()) {
+                appendLine("（无）")
             } else {
-                "—"
-            },
-            "反馈数：${metrics.feedbackCount}，平均评分：" +
-                if (metrics.feedbackCount > 0) {
-                    String.format(Locale.CHINA, "%.1f", metrics.averageRating)
-                } else {
-                    "—"
-                } + " / 5",
-            "一定会用：${metrics.wouldUseCount} 人",
-            "转换失败次数：${metrics.errorCount}",
-            "",
-            "主要反馈：",
-        )
-        if (feedback.isEmpty()) {
-            lines += "· （暂无）"
-        } else {
-            feedback.takeLast(6).forEach { entry ->
-                lines += "· [${entry.rating}★] " +
-                    (entry.text.ifBlank { "（无文字）" }) +
-                    (if (entry.intent.isNotBlank()) " / ${entry.intent}" else "")
+                current.history.forEach { record ->
+                    appendLine(
+                        "· ${stamp.format(Date(record.timestamp))} | ${record.fileName} | " +
+                            "${record.pages} 张 | ${record.totalBytes / 1024} KB | ${record.durationMs} ms",
+                    )
+                }
             }
         }
-        return lines.joinToString("\n")
-    }
 
-    private fun buildExportJson(): String {
-        val metrics = ValidationCalculator.compute(snapshot)
-        val root = JSONObject()
-        root.put("exportedAt", System.currentTimeMillis())
-        root.put("product", AppConfig.APP_NAME)
-        root.put("platform", "android")
-
-        val config = JSONObject()
-        config.put("hypothesis", AppConfig.HYPOTHESIS)
-        config.put("successMetric", AppConfig.SUCCESS_METRIC)
-        config.put("completeRateTarget", AppConfig.COMPLETE_RATE_TARGET)
-        config.put("ratingTarget", AppConfig.RATING_TARGET)
-        config.put("sampleTarget", AppConfig.SAMPLE_TARGET)
-        config.put("abTest", AppConfig.AB_TEST_NAME)
-        root.put("config", config)
-
-        val summary = JSONObject()
-        summary.put("sessions", metrics.totalSessions)
-        summary.put("completed", metrics.completedSessions)
-        summary.put("completionRate", metrics.completionRate)
-        summary.put("feedbackCount", metrics.feedbackCount)
-        summary.put("avgRating", metrics.averageRating)
-        summary.put("wouldUse", metrics.wouldUseCount)
-        summary.put("errorEvents", metrics.errorCount)
-        root.put("summary", summary)
-
-        val sessions = JSONArray()
-        snapshot.sessions.forEach { session ->
-            val sessionObject = JSONObject()
-            sessionObject.put("id", session.id)
-            sessionObject.put("startedAt", session.startedAt)
-            sessionObject.put("variant", session.variant)
-
-            val events = JSONArray()
-            session.events.forEach { event ->
-                val eventObject = JSONObject()
-                eventObject.put("t", event.timestamp)
-                eventObject.put("event", event.name)
-                eventObject.put("screen", event.screen)
-                eventObject.put("props", JSONObject(event.props))
-                events.put(eventObject)
+        viewModelScope.launch {
+            val fileName = "billpic-diagnostics-" + System.currentTimeMillis() + ".txt"
+            val uri = runCatching { MediaSaver.writeExport(context, text, fileName) }.getOrNull()
+            if (uri == null) {
+                hud("诊断信息导出失败，请重试")
+                return@launch
             }
-            sessionObject.put("events", events)
-
-            val feedback = JSONArray()
-            session.feedback.forEach { entry ->
-                val feedbackObject = JSONObject()
-                feedbackObject.put("t", entry.timestamp)
-                feedbackObject.put("rating", entry.rating)
-                feedbackObject.put("text", entry.text)
-                feedbackObject.put("intent", entry.intent)
-                feedbackObject.put("converted", entry.converted)
-                feedbackObject.put("formatId", entry.formatId)
-                feedbackObject.put("pages", entry.pages)
-                feedback.put(feedbackObject)
-            }
-            sessionObject.put("feedback", feedback)
-            sessions.put(sessionObject)
+            track("diagnostics_export")
+            launchExternal(
+                MediaSaver.exportShareIntent(uri, fileName, "text/plain", "发送诊断信息"),
+                "没有可用的分享应用",
+            )
         }
-        root.put("sessions", sessions)
-
-        return root.toString(2)
     }
 }

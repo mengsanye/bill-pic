@@ -41,13 +41,16 @@ import com.next.billpic.ui.theme.AppColor
 import com.next.billpic.ui.theme.AppText
 
 /**
- * 验证看板。
+ * 验证看板。**只在 debug 源集存在**——上架包里这个文件不参与编译。
  *
- * 这是整个原型存在的意义：让团队在走查结束后能直接拿到「继续 / 调整 / 停止」的依据，
+ * 这是整个走查工具存在的意义：让团队在走查结束后能直接拿到「继续 / 调整 / 停止」的依据，
  * 而不是靠感觉。判定规则与原型一致，比例全部以「会话」为单位。
+ *
+ * main 源集只调用 [ValidationPanelHost] 这个入口名，具体实现由构建变体提供：
+ * debug 是这一屏，release 是一个空 composable。
  */
 @Composable
-fun ValidationPanelScreen(
+fun ValidationPanelHost(
     state: MainUiState,
     onNewSession: () -> Unit,
     onResetData: () -> Unit,

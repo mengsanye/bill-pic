@@ -41,29 +41,35 @@ object PdfConverter {
     }
 
     /**
-     * 逐页渲染并编码。
+     * 渲染并编码指定页面。
      *
-     * @param onProgress (已完成页数, 总页数)，回调发生在 IO 线程，调用方自行切回主线程。
+     * @param pageIndices 1-based 页码，升序去重且已由 [com.next.billpic.core.model.PageRange]
+     *                    校验过；传 null 表示「转换前 [AppConfig.MAX_PAGES] 页」。
+     * @param onProgress  (已完成页数, 总页数)，回调发生在 IO 线程，调用方自行切回主线程。
      */
     suspend fun convert(
         file: File,
         displayName: String,
         format: OutputFormat,
         scale: OutputScale,
-        maxPages: Int = AppConfig.MAX_PAGES,
+        pageIndices: List<Int>? = null,
         onProgress: (done: Int, total: Int) -> Unit,
     ): List<ConvertedPage> = withContext(Dispatchers.IO) {
         val base = com.next.billpic.core.io.PickedFile.safeBaseName(displayName)
         val renderer = openRenderer(file)
         try {
-            val total = min(renderer.pageCount, maxPages).coerceAtLeast(1)
-            onProgress(0, total)
+            val available = renderer.pageCount
+            val targets = (pageIndices ?: (1..min(available, AppConfig.MAX_PAGES)).toList())
+                .filter { it in 1..available }
+            if (targets.isEmpty()) throw PdfConversionException("没有可转换的页面，换一个文件试试")
 
-            val results = ArrayList<ConvertedPage>(total)
-            for (index in 0 until total) {
+            onProgress(0, targets.size)
+
+            val results = ArrayList<ConvertedPage>(targets.size)
+            targets.forEachIndexed { index, pageNo ->
                 coroutineContext.ensureActive()
 
-                val page = renderer.openPage(index)
+                val page = renderer.openPage(pageNo - 1)
                 try {
                     val size = renderSize(page.width, page.height, scale.value)
                     val bitmap = createBitmap(size.first, size.second)
@@ -71,10 +77,11 @@ object PdfConverter {
                         // 发票底色是白的；显式铺白可避免 PNG 出现透明背景、JPG 出现黑底
                         Canvas(bitmap).drawColor(Color.WHITE)
                         page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-                        val bytes = bitmap.encode(format)
-                        val suffix = if (total > 1) "-p" + (index + 1) else ""
+                        val bytes = bitmap.encode(format, scale.jpegQuality)
+                        // 多页时带上真实页码，用户拿到的文件名与发票页序对得上
+                        val suffix = if (targets.size > 1) "-p$pageNo" else ""
                         results += ConvertedPage(
-                            page = index + 1,
+                            page = pageNo,
                             fileName = base + suffix + "." + format.ext,
                             bytes = bytes,
                             width = size.first,
@@ -86,7 +93,7 @@ object PdfConverter {
                 } finally {
                     page.close()
                 }
-                onProgress(index + 1, total)
+                onProgress(index + 1, targets.size)
             }
             results
         } finally {
@@ -142,17 +149,18 @@ object PdfConverter {
     private fun createBitmap(width: Int, height: Int): Bitmap = try {
         Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     } catch (e: OutOfMemoryError) {
-        throw PdfConversionException("图片尺寸太大，请把清晰度调低一档")
+        throw PdfConversionException("图片尺寸太大，请把输出档位调低一档")
     }
 
-    private fun Bitmap.encode(format: OutputFormat): ByteArray {
+    /** JPEG 质量跟着档位走：省空间档压得更狠，这是「传得上去」的关键杠杆之一。 */
+    private fun Bitmap.encode(format: OutputFormat, jpegQuality: Int): ByteArray {
         val out = ByteArrayOutputStream(512 * 1024)
         val compressFormat = if (format == OutputFormat.PNG) {
             Bitmap.CompressFormat.PNG
         } else {
             Bitmap.CompressFormat.JPEG
         }
-        val quality = if (format == OutputFormat.PNG) 100 else AppConfig.JPEG_QUALITY
+        val quality = if (format == OutputFormat.PNG) 100 else jpegQuality
         compress(compressFormat, quality, out)
         return out.toByteArray()
     }

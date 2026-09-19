@@ -58,6 +58,7 @@ fun ResultScreen(
     state: MainUiState,
     onOpenViewer: (Int) -> Unit,
     onSaveOne: (Int) -> Unit,
+    onShareOne: (Int) -> Unit,
     onSaveAll: () -> Unit,
     onShare: () -> Unit,
     modifier: Modifier = Modifier,
@@ -123,6 +124,7 @@ fun ResultScreen(
                     page = page,
                     onOpen = { onOpenViewer(page.page) },
                     onSave = { onSaveOne(page.page) },
+                    onShare = { onShareOne(page.page) },
                 )
             }
             Spacer(Modifier.height(16.dp))
@@ -155,6 +157,7 @@ private fun PageCard(
     page: ConvertedPage,
     onOpen: () -> Unit,
     onSave: () -> Unit,
+    onShare: () -> Unit,
 ) {
     val palette = AppColor
     val haptics = rememberTapHaptics()
@@ -196,6 +199,7 @@ private fun PageCard(
                 .fillMaxWidth()
                 .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
                 text = "第 ${page.page} 页 · ${Formatters.bytes(page.bytes.size.toLong())} · " +
@@ -204,6 +208,24 @@ private fun PageCard(
                 color = palette.label2,
                 modifier = Modifier.weight(1f),
             )
+            // 单页分享：只把这一张发给同事，不必把整份发票都发出去
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(palette.fill)
+                    .clickable {
+                        haptics()
+                        onShare()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+            ) {
+                Text(
+                    text = "分享这张",
+                    style = AppText.Note,
+                    color = palette.label,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(9.dp))

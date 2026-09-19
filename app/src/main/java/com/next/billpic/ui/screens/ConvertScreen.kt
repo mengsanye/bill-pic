@@ -24,11 +24,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.next.billpic.R
 import com.next.billpic.core.model.AppConfig
 import com.next.billpic.core.model.OutputFormat
 import com.next.billpic.core.model.OutputScale
+import com.next.billpic.core.model.PageRange
 import com.next.billpic.core.model.PdfSource
 import com.next.billpic.core.util.Formatters
 import com.next.billpic.ui.MainUiState
@@ -37,10 +37,12 @@ import com.next.billpic.ui.components.PdfBadge
 import com.next.billpic.ui.components.PrimaryActionButton
 import com.next.billpic.ui.components.RowDivider
 import com.next.billpic.ui.components.ScreenScroll
+import com.next.billpic.ui.components.SecondaryActionButton
 import com.next.billpic.ui.components.SectionHeader
 import com.next.billpic.ui.components.SegmentedControl
 import com.next.billpic.ui.components.SettingRow
 import com.next.billpic.ui.components.SurfaceCard
+import com.next.billpic.ui.components.TextInputRow
 import com.next.billpic.ui.components.rememberTapHaptics
 import com.next.billpic.ui.theme.AppColor
 import com.next.billpic.ui.theme.AppText
@@ -48,8 +50,9 @@ import com.next.billpic.ui.theme.AppText
 /**
  * 转换（首页）。
  *
- * 与原型一致：价值主张 → 主按钮（A/B 文案）→ 已选文件 → 输出设置 → 「已生成 N 张」入口。
- * 主按钮同时承担「选文件」与「重新选择」，减少一次点击。
+ * 主按钮同时承担「选文件」与「重新选择」，减少一次点击；
+ * 输出设置里除了格式与档位，新增**页码范围**——报销场景经常是
+ * 「这份 PDF 里只有第 3 页是我的」，不给选择权会逼用户去别的工具。
  */
 @Composable
 fun ConvertScreen(
@@ -58,6 +61,8 @@ fun ConvertScreen(
     onClear: () -> Unit,
     onFormat: (OutputFormat) -> Unit,
     onScale: (OutputScale) -> Unit,
+    onPageRange: (String) -> Unit,
+    onConvert: () -> Unit,
     onGoResult: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -78,7 +83,12 @@ fun ConvertScreen(
                     .background(palette.blue.copy(alpha = 0.10f)),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(text = "📄", fontSize = 30.sp)
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_doc),
+                    contentDescription = null,
+                    tint = palette.blue,
+                    modifier = Modifier.size(30.dp),
+                )
             }
             Spacer(Modifier.height(14.dp))
             Text(
@@ -173,7 +183,7 @@ fun ConvertScreen(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "清晰度",
+                        text = "输出档位",
                         style = AppText.Body,
                         color = palette.label,
                         modifier = Modifier.weight(1f),
@@ -188,6 +198,38 @@ fun ConvertScreen(
                 Spacer(Modifier.height(9.dp))
                 Text(text = state.scale.hint, style = AppText.Caption, color = palette.label3)
             }
+
+            if (source != null) {
+                RowDivider(startPadding = 16)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                ) {
+                    Text(
+                        text = "页码范围",
+                        style = AppText.Body,
+                        color = palette.label,
+                    )
+                    Spacer(Modifier.height(9.dp))
+                    TextInputRow(
+                        value = state.pageRangeInput,
+                        placeholder = "留空 = 全部（如 1-3,5）",
+                        onValueChange = onPageRange,
+                        enabled = !state.converting && !state.parsing,
+                        error = state.pageRangeError,
+                        helper = pageRangeHelper(state),
+                    )
+                }
+            }
+        }
+
+        if (state.settingsDirty) {
+            Spacer(Modifier.height(14.dp))
+            SecondaryActionButton(
+                text = "用当前设置重新转换",
+                onClick = onConvert,
+            )
         }
 
         if (state.results.isNotEmpty()) {
@@ -202,11 +244,11 @@ fun ConvertScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = "已生成 ${state.results.size} 张图片",
+                    text = "上次转换：${state.results.size} 张图片",
                     style = AppText.Sub,
                     color = palette.label,
                 )
-                LinkTextButton(text = "去看看 ›", onClick = onGoResult)
+                LinkTextButton(text = "查看结果 ›", onClick = onGoResult)
             }
         }
 
@@ -223,9 +265,25 @@ private fun sourceMeta(source: PdfSource, parsing: Boolean): String {
     val size = Formatters.bytes(source.sizeBytes)
     if (parsing) return "$size · 读取中…"
     val warning = if (source.pageCount > AppConfig.MAX_PAGES) {
-        "　仅转前 ${AppConfig.MAX_PAGES} 页"
+        "　共 ${source.pageCount} 页，可在下方选页码"
     } else {
         ""
     }
     return "$size · 共 ${source.pageCount} 页$warning"
+}
+
+/** 页码输入框下方的一行说明：合法时告知会转几页，非法时由 error 接管。 */
+private fun pageRangeHelper(state: MainUiState): String? {
+    val source = state.source ?: return null
+    if (state.pageRangeError != null) return null
+    if (state.pageRangeInput.isBlank()) {
+        return "留空 = 转换全部 ${minOf(source.pageCount, AppConfig.MAX_PAGES)} 页"
+    }
+    val base = "将转换 ${state.selectedPages.size} 页：" +
+        PageRange.describe(state.selectedPages)
+    return if (state.pageRangeTruncated) {
+        "$base（超出单次上限，只取前 ${AppConfig.MAX_PAGES} 页）"
+    } else {
+        base
+    }
 }

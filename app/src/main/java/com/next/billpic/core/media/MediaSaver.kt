@@ -121,28 +121,48 @@ object MediaSaver {
         }
     }
 
-    /** 导出走查数据为 JSON 文件，返回可分享的 Uri */
+    /** 导出文本（走查 JSON / 诊断信息）到应用私有目录，返回可分享的 Uri */
     suspend fun writeExport(
         context: Context,
-        json: String,
+        content: String,
         fileName: String,
     ): Uri = withContext(Dispatchers.IO) {
         val dir = File(context.filesDir, "export")
         if (!dir.exists()) dir.mkdirs()
         val file = File(dir, fileName)
-        file.writeText(json)
+        file.writeText(content)
         FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
     }
 
-    fun exportShareIntent(uri: Uri, fileName: String): Intent {
+    fun exportShareIntent(
+        uri: Uri,
+        fileName: String,
+        mime: String = "application/json",
+        title: String = "导出文件",
+    ): Intent {
         val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "application/json"
+            type = mime
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_SUBJECT, fileName)
         }
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        return Intent.createChooser(intent, "导出走查数据").apply {
+        return Intent.createChooser(intent, title).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+    }
+
+    /**
+     * 打开系统相册。
+     *
+     * 用于「记录」页：图片存在相册里而不是应用内，
+     * 用户点一条记录想看原图时，带他去真正能看到图的地方。
+     * 部分定制 ROM 没有可响应的相册 Activity，返回 null 由调用方兜底提示。
+     */
+    fun openGalleryIntent(): Intent {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return intent
     }
 }

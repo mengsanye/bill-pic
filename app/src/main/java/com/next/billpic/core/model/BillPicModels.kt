@@ -14,17 +14,31 @@ enum class OutputFormat(val id: String, val ext: String, val mime: String, val l
 }
 
 /**
- * 输出清晰度。倍数直接作用在 PDF 页面的点尺寸上：
- * 一页 595×842pt 的 A4 发票，高清档输出即 1190×1684 px，与原型一致。
+ * 输出档位。
+ *
+ * 命名刻意从「清晰度」改成「体积取向」——报销场景真正的拦路虎不是不够清晰，
+ * 而是**平台有上传大小限制，转出来传不上去**。所以第一档直接叫「省空间」，
+ * 并且档位同时控制渲染倍数与 JPEG 质量，两个杠杆一起用。
  */
-enum class OutputScale(val id: String, val value: Float, val label: String, val hint: String) {
-    STANDARD("1.5", 1.5f, "标准", "标准：体积小，适合微信直接发"),
-    HIGH("2", 2f, "高清", "高清：发票文字清晰，体积适中"),
-    ULTRA("3", 3f, "超清", "超清：适合打印或放大核对"),
+enum class OutputScale(
+    val id: String,
+    val value: Float,
+    val jpegQuality: Int,
+    val label: String,
+    val hint: String,
+) {
+    COMPACT("compact", 1.2f, 80, "省空间", "文件最小，适合有上传大小限制的报销平台"),
+    STANDARD("standard", 2f, 90, "标准", "A4 发票约 1190×1684，日常够用"),
+    HIGH("high", 3f, 92, "高清", "发票文字最锐利，文件也最大"),
     ;
 
     companion object {
-        fun fromId(id: String?): OutputScale = entries.firstOrNull { it.id == id } ?: HIGH
+        /** 兼容早期版本用倍数当 id 的记录（"1.5" / "2" / "3"）。 */
+        fun fromId(id: String?): OutputScale = entries.firstOrNull { it.id == id } ?: when (id) {
+            "1.5" -> COMPACT
+            "3" -> HIGH
+            else -> STANDARD
+        }
     }
 }
 
@@ -87,14 +101,34 @@ data class TrialSession(
     val feedback: List<FeedbackEntry> = emptyList(),
 )
 
-/** 本地持久化的全部验证数据 */
+/**
+ * 走查数据。
+ *
+ * 刻意**不含 history**——转换记录是用户自己的数据，上架包也要用；
+ * 会话与事件是走查专用的，上架包里根本不存在（见 src/release 源集）。
+ * 两者粒度不同、生命周期不同、合规要求也不同，混在一个快照里是上一版的隐患。
+ */
 data class TelemetrySnapshot(
     val sessions: List<TrialSession> = emptyList(),
     val currentSessionId: String? = null,
-    val history: List<ConversionRecord> = emptyList(),
-    val preferredFormatId: String = OutputFormat.JPG.id,
-    val preferredScaleId: String = OutputScale.HIGH.id,
 ) {
     val currentSession: TrialSession?
         get() = sessions.firstOrNull { it.id == currentSessionId }
+}
+
+/**
+ * 用户自己的数据。**上架包与走查包都需要**，与走查埋点严格分开存放。
+ *
+ * history 里含发票文件名——属个人信息，所以「我的」页必须提供清除入口，
+ * 隐私说明也必须如实披露留存内容与条数。
+ */
+data class UserSnapshot(
+    val history: List<ConversionRecord> = emptyList(),
+    val preferredFormatId: String = OutputFormat.JPG.id,
+    val preferredScaleId: String = OutputScale.STANDARD.id,
+) {
+    companion object {
+        /** 转换记录保留上限。超过后丢弃最旧的一条。 */
+        const val MAX_HISTORY = 50
+    }
 }

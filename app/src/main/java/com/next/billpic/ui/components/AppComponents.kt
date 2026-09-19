@@ -28,24 +28,31 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -142,12 +149,19 @@ fun LargeTitleBar(title: String, modifier: Modifier = Modifier) {
     )
 }
 
+/**
+ * 导航栏（带返回）。
+ *
+ * `trailing` 用于放页面级次要动作，例如结果页的「换一份发票」——
+ * 放在导航栏而不是底部操作栏，是为了不挤占「保存全部」这个主操作的位置。
+ */
 @Composable
 fun BackTitleBar(
     backLabel: String,
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
 ) {
     val palette = AppColor
     val haptics = rememberTapHaptics()
@@ -178,6 +192,9 @@ fun BackTitleBar(
             Text(text = backLabel, style = AppText.Body, color = palette.blue)
         }
         Text(text = title, style = AppText.NavTitle, color = palette.label)
+        if (trailing != null) {
+            Box(modifier = Modifier.align(Alignment.CenterEnd)) { trailing() }
+        }
     }
 }
 
@@ -440,15 +457,23 @@ fun MetaRow(label: String, value: String, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * 列表动作行。
+ *
+ * 图标用矢量而不是 emoji：emoji 在各厂商 ROM 上会被替换成自家字形（华为/小米/三星
+ * 三套风格），且无法跟随主题 tint，在「我的」这类系统感强的页面里尤其突兀。
+ */
 @Composable
 fun ListActionRow(
-    emoji: String,
+    iconRes: Int,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    accent: Color? = null,
 ) {
     val palette = AppColor
+    val tone = accent ?: palette.blue
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -460,10 +485,15 @@ fun ListActionRow(
             modifier = Modifier
                 .size(32.dp)
                 .clip(RoundedCornerShape(9.dp))
-                .background(palette.fill),
+                .background(tone.copy(alpha = 0.12f)),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text = emoji, fontSize = 15.sp)
+            Icon(
+                painter = painterResource(id = iconRes),
+                contentDescription = null,
+                tint = tone,
+                modifier = Modifier.size(17.dp),
+            )
         }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -516,7 +546,7 @@ fun PdfBadge(label: String = "PDF", modifier: Modifier = Modifier) {
 
 @Composable
 fun EmptyState(
-    emoji: String,
+    iconRes: Int,
     title: String,
     description: String,
     modifier: Modifier = Modifier,
@@ -528,11 +558,95 @@ fun EmptyState(
             .padding(top = 72.dp, bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(text = emoji, fontSize = 38.sp)
-        Spacer(Modifier.height(12.dp))
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(24.dp))
+                .background(palette.fill),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                painter = painterResource(id = iconRes),
+                contentDescription = null,
+                tint = palette.label3,
+                modifier = Modifier.size(32.dp),
+            )
+        }
+        Spacer(Modifier.height(14.dp))
         Text(text = title, style = AppText.Title, color = palette.label)
         Spacer(Modifier.height(6.dp))
         Text(text = description, style = AppText.Sub, color = palette.label2)
+    }
+}
+
+/**
+ * 单行文本输入框。
+ *
+ * 自绘而不是用 M3 的 OutlinedTextField：后者的浮动标签与默认高度会让
+ * 「输出设置」卡片里突然冒出一个 Material 味很重的控件，破坏既定视觉。
+ * 校验失败时边框转红、下方给一句人话说明——不只画个红框了事。
+ */
+@Composable
+fun TextInputRow(
+    value: String,
+    placeholder: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    error: String? = null,
+    helper: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val palette = AppColor
+    var focused by remember { mutableStateOf(false) }
+    val borderColor = when {
+        error != null -> palette.red
+        focused -> palette.blue
+        else -> palette.separator
+    }
+
+    Column(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(palette.fill)
+                .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                if (value.isEmpty()) {
+                    Text(text = placeholder, style = AppText.Body, color = palette.label3)
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    enabled = enabled,
+                    singleLine = true,
+                    textStyle = AppText.Body.copy(color = palette.label),
+                    cursorBrush = SolidColor(palette.blue),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focused = it.isFocused },
+                )
+            }
+            if (trailing != null) {
+                Spacer(Modifier.width(6.dp))
+                trailing()
+            }
+        }
+        val note = error ?: helper
+        if (!note.isNullOrBlank()) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = note,
+                style = AppText.Caption,
+                color = if (error != null) palette.red else palette.label3,
+                modifier = Modifier.padding(start = 2.dp),
+            )
+        }
     }
 }
 

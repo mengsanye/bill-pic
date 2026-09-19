@@ -1,7 +1,6 @@
 package com.next.billpic.core.data
 
 import android.content.Context
-import com.next.billpic.core.model.ConversionRecord
 import com.next.billpic.core.model.FeedbackEntry
 import com.next.billpic.core.model.TelemetrySnapshot
 import com.next.billpic.core.model.TrackedEvent
@@ -10,11 +9,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 走查数据的本地持久化。
+ * 走查数据的本地持久化。**只存在于 debug 源集**——上架包里没有这个类。
  *
- * 只存 JSON 到 SharedPreferences —— 数据量小、结构会随走查快速迭代，
- * 上 Room 反而拖慢速度；等数据模型稳定后再换。
- * 注意：这里存的是「事件与反馈」，用户发票文件从不落在这个库里。
+ * 只存 JSON 到 SharedPreferences：数据量小、结构会随走查快速迭代，
+ * 上 Room 反而拖慢速度。
+ *
+ * 边界：这里只存「会话 / 事件 / 反馈」。用户的转换记录与偏好走 [UserDataStore]，
+ * 发票文件本身从不落库。
  */
 class TelemetryStore(context: Context) {
 
@@ -39,8 +40,6 @@ class TelemetryStore(context: Context) {
     private fun encode(snapshot: TelemetrySnapshot): String {
         val root = JSONObject()
         root.put("currentSessionId", snapshot.currentSessionId ?: JSONObject.NULL)
-        root.put("preferredFormatId", snapshot.preferredFormatId)
-        root.put("preferredScaleId", snapshot.preferredScaleId)
 
         val sessions = JSONArray()
         snapshot.sessions.forEach { session ->
@@ -79,21 +78,6 @@ class TelemetryStore(context: Context) {
             sessions.put(sessionObject)
         }
         root.put("sessions", sessions)
-
-        val history = JSONArray()
-        snapshot.history.forEach { record ->
-            val recordObject = JSONObject()
-            recordObject.put("t", record.timestamp)
-            recordObject.put("fileName", record.fileName)
-            recordObject.put("pages", record.pages)
-            recordObject.put("formatId", record.formatId)
-            recordObject.put("scaleValue", record.scaleValue.toDouble())
-            recordObject.put("totalBytes", record.totalBytes)
-            recordObject.put("durationMs", record.durationMs)
-            history.put(recordObject)
-        }
-        root.put("history", history)
-
         return root.toString()
     }
 
@@ -149,34 +133,14 @@ class TelemetryStore(context: Context) {
             )
         }
 
-        val history = mutableListOf<ConversionRecord>()
-        val historyArray = root.optJSONArray("history") ?: JSONArray()
-        for (i in 0 until historyArray.length()) {
-            val recordObject = historyArray.optJSONObject(i) ?: continue
-            history += ConversionRecord(
-                timestamp = recordObject.optLong("t"),
-                fileName = recordObject.optString("fileName"),
-                pages = recordObject.optInt("pages"),
-                formatId = recordObject.optString("formatId"),
-                scaleValue = recordObject.optDouble("scaleValue", 2.0).toFloat(),
-                totalBytes = recordObject.optLong("totalBytes"),
-                durationMs = recordObject.optLong("durationMs"),
-            )
-        }
+        val currentId =
+            if (root.isNull("currentSessionId")) null else root.optString("currentSessionId")
 
-        val currentId = if (root.isNull("currentSessionId")) null else root.optString("currentSessionId")
-
-        return TelemetrySnapshot(
-            sessions = sessions,
-            currentSessionId = currentId,
-            history = history,
-            preferredFormatId = root.optString("preferredFormatId", "jpg"),
-            preferredScaleId = root.optString("preferredScaleId", "2"),
-        )
+        return TelemetrySnapshot(sessions = sessions, currentSessionId = currentId)
     }
 
     private companion object {
         const val PREFS_NAME = "billpic_telemetry"
-        const val KEY_STATE = "state_v1"
+        const val KEY_STATE = "state_v2"
     }
 }

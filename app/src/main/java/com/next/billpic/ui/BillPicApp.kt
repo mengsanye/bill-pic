@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -40,16 +41,22 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.next.billpic.core.model.LegalText
+import com.next.billpic.ui.components.AppConfirmDialog
 import com.next.billpic.ui.components.BackTitleBar
 import com.next.billpic.ui.components.HudOverlay
 import com.next.billpic.ui.components.LargeTitleBar
+import com.next.billpic.ui.components.LinkTextButton
 import com.next.billpic.ui.components.rememberTapHaptics
+import com.next.billpic.ui.screens.AboutScreen
 import com.next.billpic.ui.screens.ConvertScreen
+import com.next.billpic.ui.screens.FaqScreen
+import com.next.billpic.ui.screens.LegalScreen
 import com.next.billpic.ui.screens.MineScreen
 import com.next.billpic.ui.screens.PrivacyScreen
 import com.next.billpic.ui.screens.RecordsScreen
 import com.next.billpic.ui.screens.ResultScreen
-import com.next.billpic.ui.screens.ValidationPanelScreen
+import com.next.billpic.ui.screens.ValidationPanelHost
 import com.next.billpic.ui.sheets.FeedbackSheetOverlay
 import com.next.billpic.ui.sheets.ImageViewerOverlay
 import com.next.billpic.ui.theme.AppColor
@@ -74,6 +81,11 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         viewModel.onFilePicked(uri)
+    }
+
+    val pickAnother: () -> Unit = {
+        viewModel.onPickTapped()
+        pickPdfLauncher.launch(arrayOf("application/pdf"))
     }
 
     /* ---------------- 写入相册权限（仅 Android 9 及以下需要） ---------------- */
@@ -103,12 +115,15 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
 
     /* ---------------- 返回键 ---------------- */
 
-    val canGoBack = state.viewerPage != null ||
+    val hasOverlay = state.viewerPage != null ||
         state.feedbackOpen ||
+        state.permissionGuideVisible ||
+        state.clearHistoryVisible ||
+        state.deleteRecordIndex != null ||
         state.mineSub != MineSub.NONE ||
         state.showResult ||
         state.tab != AppTab.CONVERT
-    BackHandler(enabled = canGoBack) { viewModel.handleBack() }
+    BackHandler(enabled = hasOverlay) { viewModel.handleBack() }
 
     /* ---------------- HUD 自动消失 ---------------- */
 
@@ -117,16 +132,6 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
         if (hud != null) {
             delay(2200)
             viewModel.consumeHud()
-        }
-    }
-
-    /* ---------------- 系统分享 / 导出 ---------------- */
-
-    val shareRequest = state.shareRequest
-    LaunchedEffect(shareRequest) {
-        if (shareRequest != null) {
-            runCatching { context.startActivity(shareRequest) }
-            viewModel.consumeShareRequest()
         }
     }
 
@@ -141,9 +146,16 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding),
+                    .padding(innerPadding)
+                    // edge-to-edge 下 adjustResize 不再压缩窗口，键盘弹出会盖住
+                    // 「用当前设置重新转换」这类底部按钮，必须显式让出 IME 高度
+                    .imePadding(),
             ) {
-                TopNavBar(state = state, onBack = { viewModel.handleBack() })
+                TopNavBar(
+                    state = state,
+                    onBack = { viewModel.handleBack() },
+                    onPickAnother = pickAnother,
+                )
 
                 when {
                     state.mineSub == MineSub.PRIVACY -> PrivacyScreen(
@@ -151,9 +163,26 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
                             viewModel.closeMineSub()
                             viewModel.selectTab(AppTab.CONVERT)
                         },
+                        onOpenPolicy = viewModel::openPolicy,
                     )
 
-                    state.mineSub == MineSub.VALIDATION -> ValidationPanelScreen(
+                    state.mineSub == MineSub.POLICY -> LegalScreen(
+                        sections = LegalText.PRIVACY_POLICY,
+                    )
+
+                    state.mineSub == MineSub.TERMS -> LegalScreen(
+                        sections = LegalText.TERMS,
+                    )
+
+                    state.mineSub == MineSub.FAQ -> FaqScreen()
+
+                    state.mineSub == MineSub.ABOUT -> AboutScreen(
+                        onFeedbackEmail = viewModel::openFeedbackEmail,
+                        onBeian = viewModel::openBeianPage,
+                        onExportDiagnostics = viewModel::exportDiagnostics,
+                    )
+
+                    state.mineSub == MineSub.VALIDATION -> ValidationPanelHost(
                         state = state,
                         onNewSession = viewModel::startNewTrialSession,
                         onResetData = viewModel::resetAllData,
@@ -165,6 +194,7 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
                         state = state,
                         onOpenViewer = viewModel::openViewer,
                         onSaveOne = { page -> runWithStoragePermission { viewModel.saveOne(page) } },
+                        onShareOne = viewModel::shareOne,
                         onSaveAll = { runWithStoragePermission { viewModel.saveAll() } },
                         onShare = viewModel::shareAll,
                     )
@@ -172,26 +202,31 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
                     state.tab == AppTab.RECORDS -> RecordsScreen(
                         state = state,
                         onRecordTap = viewModel::recordTap,
-                        onOpenLatest = viewModel::goToResult,
+                        onRecordLongPress = viewModel::requestDeleteRecord,
                     )
 
                     state.tab == AppTab.MINE -> MineScreen(
                         state = state,
                         onPrivacy = viewModel::openPrivacy,
-                        onFeedback = viewModel::openFeedback,
-                        onAbout = viewModel::showAbout,
+                        onPolicy = viewModel::openPolicy,
+                        onTerms = viewModel::openTerms,
+                        onClearHistory = viewModel::requestClearHistory,
+                        onFeedbackEmail = viewModel::openFeedbackEmail,
+                        onFaq = viewModel::openFaq,
+                        onAbout = viewModel::openAbout,
                         onValidationPanel = viewModel::openValidationPanel,
+                        onQuickRating = viewModel::openFeedback,
+                        onBeian = viewModel::openBeianPage,
                     )
 
                     else -> ConvertScreen(
                         state = state,
-                        onPick = {
-                            viewModel.onPickTapped()
-                            pickPdfLauncher.launch(arrayOf("application/pdf"))
-                        },
+                        onPick = pickAnother,
                         onClear = viewModel::clearFile,
                         onFormat = viewModel::setFormat,
                         onScale = viewModel::setScale,
+                        onPageRange = viewModel::setPageRange,
+                        onConvert = viewModel::convertNow,
                         onGoResult = viewModel::goToResult,
                     )
                 }
@@ -214,38 +249,87 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
                 state.results.firstOrNull { it.page == page }
             },
             onClose = viewModel::closeViewer,
-            onSave = { state.viewerPage?.let { page -> runWithStoragePermission { viewModel.saveOne(page) } } },
+            onSave = {
+                state.viewerPage?.let { page -> runWithStoragePermission { viewModel.saveOne(page) } }
+            },
+        )
+    }
+
+    /* ---------------- 二次确认弹窗 ---------------- */
+
+    if (state.clearHistoryVisible) {
+        AppConfirmDialog(
+            title = "清除转换记录？",
+            message = "将删除本机保存的 ${state.history.size} 条转换记录，" +
+                "其中包含发票文件名。已保存到系统相册的图片不受影响。" +
+                "此操作不可恢复。",
+            confirmText = "清除",
+            onConfirm = viewModel::confirmClearHistory,
+            onDismiss = viewModel::dismissClearHistory,
+            destructive = true,
+        )
+    }
+
+    state.deleteRecordIndex?.let { index ->
+        val record = state.history.getOrNull(index)
+        AppConfirmDialog(
+            title = "删除这条记录？",
+            message = (record?.fileName?.let { "「$it」\n\n" } ?: "") +
+                "仅删除转换记录，系统相册里的图片不受影响。",
+            confirmText = "删除",
+            onConfirm = viewModel::confirmDeleteRecord,
+            onDismiss = viewModel::dismissDeleteRecord,
+            destructive = true,
+        )
+    }
+
+    if (state.permissionGuideVisible) {
+        AppConfirmDialog(
+            title = "无法保存到相册",
+            message = "系统需要「存储」权限才能把图片写入相册。" +
+                "你可以到系统设置里开启后重试，也可以先在应用内查看转换结果。",
+            confirmText = "去设置",
+            onConfirm = {
+                viewModel.dismissPermissionGuide()
+                viewModel.openAppSettings()
+            },
+            onDismiss = viewModel::dismissPermissionGuide,
+            dismissText = "知道了",
         )
     }
 }
 
 @Composable
-private fun TopNavBar(state: MainUiState, onBack: () -> Unit) {
+private fun TopNavBar(
+    state: MainUiState,
+    onBack: () -> Unit,
+    onPickAnother: () -> Unit,
+) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        when {
-            state.mineSub == MineSub.PRIVACY -> BackTitleBar(
-                backLabel = "我的",
-                title = "隐私说明",
-                onBack = onBack,
-            )
+        when (state.mineSub) {
+            MineSub.PRIVACY -> BackTitleBar("我的", "隐私说明", onBack)
+            MineSub.POLICY -> BackTitleBar("我的", LegalText.PRIVACY_TITLE, onBack)
+            MineSub.TERMS -> BackTitleBar("我的", LegalText.TERMS_TITLE, onBack)
+            MineSub.FAQ -> BackTitleBar("我的", "常见问题", onBack)
+            MineSub.ABOUT -> BackTitleBar("我的", "关于", onBack)
+            MineSub.VALIDATION -> BackTitleBar("我的", "验证看板", onBack)
+            MineSub.NONE -> when {
+                state.showResult -> BackTitleBar(
+                    backLabel = "转换",
+                    title = "转换完成",
+                    onBack = onBack,
+                    // 换一份发票放在导航栏，不挤占底部「保存全部」这个主操作
+                    trailing = {
+                        if (state.canPickAnother) {
+                            LinkTextButton(text = "换一份", onClick = onPickAnother)
+                        }
+                    },
+                )
 
-            state.mineSub == MineSub.VALIDATION -> BackTitleBar(
-                backLabel = "我的",
-                title = "验证看板",
-                onBack = onBack,
-            )
-
-            state.showResult -> BackTitleBar(
-                backLabel = "转换",
-                title = "转换完成",
-                onBack = onBack,
-            )
-
-            state.tab == AppTab.RECORDS -> LargeTitleBar(title = "记录")
-
-            state.tab == AppTab.MINE -> LargeTitleBar(title = "我的")
-
-            else -> LargeTitleBar(title = "发票变图片")
+                state.tab == AppTab.RECORDS -> LargeTitleBar(title = "记录")
+                state.tab == AppTab.MINE -> LargeTitleBar(title = "我的")
+                else -> LargeTitleBar(title = "发票变图片")
+            }
         }
     }
 }
