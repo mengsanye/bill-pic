@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- 转换结果临时落盘目录：用于分享单张/多张图片 -->
+    <cache-path
+        name="billpic_cache"
+        path="." />
+    <!-- 导出走查数据（JSON）目录 -->
+    <files-path
+        name="billpic_files"
+        path="export/" />
+</paths>

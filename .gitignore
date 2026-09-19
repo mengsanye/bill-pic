@@ -1,0 +1,26 @@
+*.iml
+.gradle
+/local.properties
+.DS_Store
+/captures
+
+# IDE 配置：整个忽略，避免因人而异的 diff 与冲突
+.idea/
+*.hprof
+
+# 构建产物
+/build
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# 原生构建
+.externalNativeBuild
+.cxx
+
+# 签名密钥：绝不入库
+*.jks
+*.keystore
+keystore.properties
+

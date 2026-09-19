@@ -1,0 +1,32 @@
+
+# ─────────────────────────────────────────────────────────────
+#  <type>(<scope>): <subject>          ← 必填，≤50 字符，祈使句，首字母小写
+#  ↑ 空一行
+#  body：为什么这么改（不写怎么做），每行 ≤72 字符
+#  ↑ 空一行
+#  footer：Closes #12 / BREAKING CHANGE: ...
+# ─────────────────────────────────────────────────────────────
+#
+#  type（必选其一）：
+#    feat      新功能 —— 用户可感知的新能力
+#    fix       修 bug —— 修复错误行为
+#    perf      性能优化 —— 更快/更省内存，行为不变
+#    refactor  重构 —— 结构变了，行为不变
+#    style     格式 —— 空白/缩进，不影响代码含义
+#    docs      文档 —— 只改 README/注释/文档
+#    test      测试 —— 新增或修改测试
+#    build     构建 —— Gradle/依赖版本/打包配置
+#    ci        持续集成 —— CI 配置、脚本
+#    chore     杂项 —— 其他不涉及 src 的琐事
+#    revert    回滚 —— 撤销之前的提交
+#
+#  scope（推荐）：convert | pdf | save | records | mine | feedback
+#                 validation | theme | ui | deps | config
+#
+#  subject：英文祈使句，首字母小写，结尾不加句号
+#            ✅ add PNG output format
+#            ❌ Added some stuff.
+#
+#  一次提交只做一件事。选不出唯一 type → 拆开提交。
+#  详见 CONTRIBUTING.md
+# ─────────────────────────────────────────────────────────────
