@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.next.billpic.core.model.AppConfig
 import com.next.billpic.core.model.LegalText
 import com.next.billpic.ui.components.AppConfirmDialog
 import com.next.billpic.ui.components.BackTitleBar
@@ -328,7 +329,7 @@ private fun TopNavBar(
 
                 state.tab == AppTab.RECORDS -> LargeTitleBar(title = "记录")
                 state.tab == AppTab.MINE -> LargeTitleBar(title = "我的")
-                else -> LargeTitleBar(title = "发票变图片")
+                else -> LargeTitleBar(title = AppConfig.APP_NAME)
             }
         }
     }
