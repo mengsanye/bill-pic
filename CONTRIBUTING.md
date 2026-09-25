@@ -77,7 +77,7 @@ feat(convert): support exporting PNG
 | `privacy` | 隐私说明与数据控制（清除记录） |
 | `theme` | 设计令牌与主题（Color / Type / Theme） |
 | `ui` | 通用 UI 组件 |
-| `icon` | 启动图标（含 `design/icon/` 下的生成脚本） |
+| `icon` | 启动图标（自适应前景 / 背景 / 单色层） |
 | `deps` | 依赖升级 |
 | `config` | 应用配置（`AppConfig`、构建脚本参数） |
 

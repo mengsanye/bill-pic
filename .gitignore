@@ -26,3 +26,6 @@
 *.p12
 keystore.properties
 
+# 图标设计源文件：只保留在本机，不随仓库分发
+/design/
+

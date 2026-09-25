@@ -5,8 +5,7 @@
   45° 线性渐变，保证任意蒙版（圆形 / 超椭圆 / 圆角方形 / 厂商自有形状）
   下都铺满画布，不留白边。渐变同时充当"打光"，让前景的白纸浮起来。
 
-  色彩令牌：与 design/icon/generate_icons.py 的 GRAD_TOP / GRAD_BOTTOM 一致。
-  #2E93FF（亮）→ #0057CC（深），中点 ≈ 品牌蓝 #007AFF。
+    色彩令牌（渐变两端）：#2E93FF（亮）→ #0057CC（深），中点 ≈ 品牌蓝 #007AFF。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"

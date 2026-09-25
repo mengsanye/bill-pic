@@ -126,7 +126,7 @@ app/src/main/java/com/next/billpic/
 
 **输出档位按体积取向命名。** 报销场景真正的拦路虎不是不够清晰，而是平台有上传大小限制、转出来传不上去。
 
-应用图标的设计推导（以及几个被否掉的方案和原因）见 [`design/icon/ICON-SPEC.md`](design/icon/ICON-SPEC.md)。
+应用图标的设计推导（以及几个被否掉的方案和原因）记在 `ic_launcher_foreground.xml` 的注释里。
 
 ## 隐私
 
