@@ -1,19 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample data extraction rules file; uncomment and customize as necessary.
-   See https://developer.android.com/about/versions/12/backup-restore#xml-changes
-   for details.
+  数据抽取规则（Android 12 / API 31 起生效）。
+
+  应用自己的数据只有一样：最近 50 条转换记录，含**发票文件名**——
+  文件名里可能带公司名称或日期，所以它不该经过任何服务器。
+
+  两条通道分开处理：
+    cloud-backup    排除。它会经网络上传到用户的 Google 云盘，
+                    与「发票不会离开你的手机」冲突。
+    device-transfer 保留。手机间直传不过网络，用户换机时历史还在。
+
+  API 30 及以下无法区分这两条通道，见 backup_rules.xml。
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="billpic_user_data.xml" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <include domain="sharedpref" path="billpic_user_data.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

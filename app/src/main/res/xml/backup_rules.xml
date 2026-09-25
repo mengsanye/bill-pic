@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
-   See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
+  旧版备份规则（Android 11 / API 30 及以下；31+ 见 data_extraction_rules.xml）。
+
+  这份格式**无法区分云备份与设备间迁移**——两者共用同一套规则。
+  「不经过服务器」优先级更高，所以这里一并排除转换记录：
+  老机型换机时会丢掉这 50 条历史，这是有意识做出的取舍。
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="billpic_user_data.xml" />
 </full-backup-content>

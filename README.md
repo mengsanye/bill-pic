@@ -54,8 +54,8 @@ BillPic 只做一件事：选一份 PDF 发票，转成图片，存进相册或�
 需要 JDK 17+ 与 Android SDK Platform 36。
 
 ```bash
-git clone <this-repo>
-cd BillPic
+git clone https://github.com/mengsanye/bill-pic.git
+cd bill-pic
 
 ./gradlew assembleDebug      # 调试包
 ./gradlew assembleRelease    # 发布包（R8 压缩，约 1.2 MB）
@@ -135,6 +135,9 @@ app/src/main/java/com/next/billpic/
 - 转换结果写到系统相册，由相册管理
 - 应用内只保留最近 **50 条**转换记录（含发票文件名、页数、格式、体积、耗时），
   可在「我的 → 清除转换记录」中随时删除
+- **转换记录被排除在系统云备份之外**——云备份会把数据上传到用户的 Google 云盘，
+  与上面这条承诺冲突。手机间直传不经过网络，因此保留；代价是 Android 11
+  及以下的机型无法区分这两条通道，换机时会丢掉这份历史（仅 50 条元信息）
 
 ## 已知限制
 
