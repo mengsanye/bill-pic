@@ -74,12 +74,12 @@ feat(convert): support exporting PNG
 | `save` | 保存到相册 / 分享（`MediaSaver`、FileProvider） |
 | `records` | 记录页 |
 | `mine` | 我的页 |
-| `feedback` | 反馈弹层 |
-| `validation` | 验证看板与埋点（`TelemetryStore`、指标计算） |
+| `privacy` | 隐私说明与数据控制（清除记录） |
 | `theme` | 设计令牌与主题（Color / Type / Theme） |
 | `ui` | 通用 UI 组件 |
+| `icon` | 启动图标（含 `design/icon/` 下的生成脚本） |
 | `deps` | 依赖升级 |
-| `config` | 应用配置（`AppConfig`、BuildConfig 开关） |
+| `config` | 应用配置（`AppConfig`、构建脚本参数） |
 
 `scope` 可以省略（如 `docs: ...`），但**能写就写** —— 它是一行信息量最大的部分。
 
@@ -177,12 +177,13 @@ git config commit.template .gitmessage
 
 ```
 feat(convert): add PNG output format
-feat(validation): track funnel by session instead of event
+feat(convert): stop auto-converting when the pdf has more than one page
+feat(privacy): add a clear-records entry to the mine screen
 fix(save): use IS_PENDING so gallery write works on Android 10
 fix(ui): show error text instead of only recoloring the label
 perf(pdf): reuse a single Bitmap across pages
-refactor(validation): extract pure metric calculator
+refactor(pdf): extract the render-size calculation
 docs: document why INTERNET permission is absent
-build(deps): bump compose-bom to 2024.09.00
+build(config): enable R8 for the release variant
 chore: ignore .idea directory
 ```
