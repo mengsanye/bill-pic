@@ -21,10 +21,9 @@ object AppConfig {
 
     /* ---------------- 项目信息 ----------------
      * fork 或改名后需要同步这一处，以及 README 与 LICENSE 里的链接。
-     * 本仓库尚未建远程，首次发布前请把 <your-org> 换成真实组织名。
      */
 
-    const val PROJECT_URL = "https://github.com/<your-org>/BillPic"
+    const val PROJECT_URL = "https://github.com/mengsanye/bill-pic"
 
     /** 问题反馈入口。开源项目用 issue 代替应用内反馈表单。 */
     const val ISSUES_URL = "$PROJECT_URL/issues"
