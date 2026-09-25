@@ -9,10 +9,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 用户自己的数据。
- *
- * 与走查埋点严格分开存放：这里的东西**上架包必须有**（转换记录、输出偏好），
- * 走查埋点则在上架包里根本不存在。混在一个 SharedPreferences 里是上一版的隐患。
+ * 用户数据的本地存储：转换记录与输出偏好。
  *
  * 只存 JSON 到 SharedPreferences —— 数据量小（最多 50 条元信息），
  * 为这点数据上 Room 会平白增加启动开销。

@@ -33,7 +33,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.next.billpic.R
 import com.next.billpic.core.model.ConvertedPage
-import com.next.billpic.core.model.OutputFormat
 import com.next.billpic.core.util.Formatters
 import com.next.billpic.core.util.Images
 import com.next.billpic.ui.MainUiState

@@ -121,36 +121,6 @@ object MediaSaver {
         }
     }
 
-    /** 导出文本（走查 JSON / 诊断信息）到应用私有目录，返回可分享的 Uri */
-    suspend fun writeExport(
-        context: Context,
-        content: String,
-        fileName: String,
-    ): Uri = withContext(Dispatchers.IO) {
-        val dir = File(context.filesDir, "export")
-        if (!dir.exists()) dir.mkdirs()
-        val file = File(dir, fileName)
-        file.writeText(content)
-        FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
-    }
-
-    fun exportShareIntent(
-        uri: Uri,
-        fileName: String,
-        mime: String = "application/json",
-        title: String = "导出文件",
-    ): Intent {
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = mime
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, fileName)
-        }
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        return Intent.createChooser(intent, title).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-    }
-
     /**
      * 打开系统相册。
      *

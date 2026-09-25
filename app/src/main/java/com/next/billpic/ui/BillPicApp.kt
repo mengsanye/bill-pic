@@ -42,7 +42,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.next.billpic.core.model.AppConfig
-import com.next.billpic.core.model.LegalText
 import com.next.billpic.ui.components.AppConfirmDialog
 import com.next.billpic.ui.components.BackTitleBar
 import com.next.billpic.ui.components.HudOverlay
@@ -52,13 +51,10 @@ import com.next.billpic.ui.components.rememberTapHaptics
 import com.next.billpic.ui.screens.AboutScreen
 import com.next.billpic.ui.screens.ConvertScreen
 import com.next.billpic.ui.screens.FaqScreen
-import com.next.billpic.ui.screens.LegalScreen
 import com.next.billpic.ui.screens.MineScreen
 import com.next.billpic.ui.screens.PrivacyScreen
 import com.next.billpic.ui.screens.RecordsScreen
 import com.next.billpic.ui.screens.ResultScreen
-import com.next.billpic.ui.screens.ValidationPanelHost
-import com.next.billpic.ui.sheets.FeedbackSheetOverlay
 import com.next.billpic.ui.sheets.ImageViewerOverlay
 import com.next.billpic.ui.theme.AppColor
 import com.next.billpic.ui.theme.AppText
@@ -67,7 +63,7 @@ import kotlinx.coroutines.delay
 /**
  * 根容器。
  *
- * 弹层（HUD / 反馈 / 全屏看图）刻意放在 Scaffold 之外，
+ * 弹层（HUD / 全屏看图 / 二次确认）刻意放在 Scaffold 之外，
  * 这样它们能盖住底部 Tab 栏，符合手机上「全屏弹层」的预期。
  */
 @Composable
@@ -117,7 +113,6 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
     /* ---------------- 返回键 ---------------- */
 
     val hasOverlay = state.viewerPage != null ||
-        state.feedbackOpen ||
         state.permissionGuideVisible ||
         state.clearHistoryVisible ||
         state.deleteRecordIndex != null ||
@@ -164,31 +159,13 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
                             viewModel.closeMineSub()
                             viewModel.selectTab(AppTab.CONVERT)
                         },
-                        onOpenPolicy = viewModel::openPolicy,
-                    )
-
-                    state.mineSub == MineSub.POLICY -> LegalScreen(
-                        sections = LegalText.PRIVACY_POLICY,
-                    )
-
-                    state.mineSub == MineSub.TERMS -> LegalScreen(
-                        sections = LegalText.TERMS,
                     )
 
                     state.mineSub == MineSub.FAQ -> FaqScreen()
 
                     state.mineSub == MineSub.ABOUT -> AboutScreen(
-                        onFeedbackEmail = viewModel::openFeedbackEmail,
-                        onBeian = viewModel::openBeianPage,
-                        onExportDiagnostics = viewModel::exportDiagnostics,
-                    )
-
-                    state.mineSub == MineSub.VALIDATION -> ValidationPanelHost(
-                        state = state,
-                        onNewSession = viewModel::startNewTrialSession,
-                        onResetData = viewModel::resetAllData,
-                        onExportJson = viewModel::exportJson,
-                        onCopySummary = viewModel::copySummary,
+                        onOpenRepo = viewModel::openProjectPage,
+                        onOpenIssues = viewModel::openIssues,
                     )
 
                     state.showResult -> ResultScreen(
@@ -209,15 +186,10 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
                     state.tab == AppTab.MINE -> MineScreen(
                         state = state,
                         onPrivacy = viewModel::openPrivacy,
-                        onPolicy = viewModel::openPolicy,
-                        onTerms = viewModel::openTerms,
                         onClearHistory = viewModel::requestClearHistory,
-                        onFeedbackEmail = viewModel::openFeedbackEmail,
+                        onOpenIssues = viewModel::openIssues,
                         onFaq = viewModel::openFaq,
                         onAbout = viewModel::openAbout,
-                        onValidationPanel = viewModel::openValidationPanel,
-                        onQuickRating = viewModel::openFeedback,
-                        onBeian = viewModel::openBeianPage,
                     )
 
                     else -> ConvertScreen(
@@ -235,14 +207,6 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
         }
 
         HudOverlay(text = state.hud, modifier = Modifier.fillMaxSize())
-
-        FeedbackSheetOverlay(
-            visible = state.feedbackOpen,
-            onDismiss = viewModel::closeFeedback,
-            onSubmit = viewModel::submitFeedback,
-            onRatingSelected = viewModel::onRatingSelected,
-            onIntentSelected = viewModel::onIntentSelected,
-        )
 
         ImageViewerOverlay(
             visible = state.viewerPage != null,
@@ -309,11 +273,8 @@ private fun TopNavBar(
     Column(modifier = Modifier.fillMaxWidth()) {
         when (state.mineSub) {
             MineSub.PRIVACY -> BackTitleBar("我的", "隐私说明", onBack)
-            MineSub.POLICY -> BackTitleBar("我的", LegalText.PRIVACY_TITLE, onBack)
-            MineSub.TERMS -> BackTitleBar("我的", LegalText.TERMS_TITLE, onBack)
             MineSub.FAQ -> BackTitleBar("我的", "常见问题", onBack)
             MineSub.ABOUT -> BackTitleBar("我的", "关于", onBack)
-            MineSub.VALIDATION -> BackTitleBar("我的", "验证看板", onBack)
             MineSub.NONE -> when {
                 state.showResult -> BackTitleBar(
                     backLabel = "转换",

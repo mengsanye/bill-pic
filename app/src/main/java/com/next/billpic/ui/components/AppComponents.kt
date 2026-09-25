@@ -367,49 +367,6 @@ fun SegmentedControl(
     }
 }
 
-@Composable
-fun ChoiceChips(
-    options: List<String>,
-    selected: String,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val palette = AppColor
-    val haptics = rememberTapHaptics()
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEach { option ->
-            val isOn = option == selected
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (isOn) palette.blue.copy(alpha = 0.12f) else palette.fill)
-                    .border(
-                        width = 1.dp,
-                        color = if (isOn) palette.blue else Color.Transparent,
-                        shape = RoundedCornerShape(10.dp),
-                    )
-                    .clickable {
-                        if (!isOn) {
-                            haptics()
-                            onSelect(option)
-                        }
-                    }
-                    .padding(horizontal = 6.dp, vertical = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = option,
-                    style = AppText.Note,
-                    color = if (isOn) palette.blue else palette.label2,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-    }
-}
-
 /* ------------------------------ 行 ------------------------------ */
 
 @Composable
@@ -712,36 +669,5 @@ fun HudOverlay(text: String?, modifier: Modifier = Modifier) {
                 .background(if (palette.isDark) Color(0xF2363638) else Color(0xF21F1F1F))
                 .padding(horizontal = 18.dp, vertical = 12.dp),
         )
-    }
-}
-
-/** 星级评分：每颗星都保证 48dp 触摸目标 */
-@Composable
-fun StarSelector(
-    rating: Int,
-    onRate: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val palette = AppColor
-    val haptics = rememberTapHaptics()
-    Row(modifier = modifier, horizontalArrangement = Arrangement.Center) {
-        (1..5).forEach { index ->
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable {
-                        haptics()
-                        onRate(index)
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (index <= rating) "★" else "☆",
-                    fontSize = 30.sp,
-                    color = if (index <= rating) palette.orange else palette.label3,
-                )
-            }
-        }
     }
 }

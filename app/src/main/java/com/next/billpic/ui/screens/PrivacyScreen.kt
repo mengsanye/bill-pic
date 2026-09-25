@@ -23,7 +23,6 @@ import com.next.billpic.ui.components.PlainInfoRow
 import com.next.billpic.ui.components.PrimaryActionButton
 import com.next.billpic.ui.components.RowDivider
 import com.next.billpic.ui.components.ScreenScroll
-import com.next.billpic.ui.components.SecondaryActionButton
 import com.next.billpic.ui.components.SurfaceCard
 import com.next.billpic.ui.theme.AppColor
 import com.next.billpic.ui.theme.AppText
@@ -31,14 +30,12 @@ import com.next.billpic.ui.theme.AppText
 /**
  * 隐私说明（信任页）。
  *
- * 与「隐私政策」分工不同：这一屏**对用户讲人话**，用可验证的方式回答
- * 「我的发票会不会被传走」；政策页是**合规文本**，讲清数据处理的法律口径。
- * 两者都保留，不互相替代。
+ * 只做一件事：用**可被验证**的方式回答「我的发票会不会被传走」。
+ * 口头的承诺没有意义——这里给的每条都指向一个用户可以自己动手做的验证。
  */
 @Composable
 fun PrivacyScreen(
     onGoHome: () -> Unit,
-    onOpenPolicy: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val palette = AppColor
@@ -88,8 +85,9 @@ fun PrivacyScreen(
             RowDivider(startPadding = 16)
             PlainInfoRow(
                 title = "怎么验证",
-                body = "这个 App 根本没有申请联网权限 —— 开飞行模式再转一次，功能照常，" +
-                    "这就是最直接的证明。",
+                body = "两种办法：一是开飞行模式再转一次，功能照常；" +
+                    "二是去应用的「设置 → 应用 → BillPic → 权限」里看，联网那一项根本不存在。" +
+                    "本项目开源，也可以直接读代码确认——不申请就不可能有上传。",
             )
             RowDivider(startPadding = 16)
             PlainInfoRow(
@@ -109,8 +107,6 @@ fun PrivacyScreen(
 
         Spacer(Modifier.height(22.dp))
         PrimaryActionButton(text = "明白了，去选发票", onClick = onGoHome)
-        Spacer(Modifier.height(10.dp))
-        SecondaryActionButton(text = "查看完整隐私政策", onClick = onOpenPolicy)
         Spacer(Modifier.height(30.dp))
     }
 }

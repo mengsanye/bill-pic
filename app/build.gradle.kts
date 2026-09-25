@@ -7,10 +7,11 @@ plugins {
 }
 
 /**
- * 上架签名配置。
+ * 发布签名配置（可选）。
  *
  * 密钥不入库：keystore.properties 被 .gitignore 排除，仓库里只留 .example 模板。
- * 文件不存在时 release 回退到 debug 签名，保证任何机器都能编译（仅用于内部走查）。
+ * 文件不存在时 release 回退到 debug 签名，保证任何机器 clone 下来都能直接构建——
+ * 只是这样的包不适合对外分发（无法覆盖安装他人构建的版本）。
  */
 val keystorePropsFile = rootProject.file("keystore.properties")
 val hasReleaseKeystore = keystorePropsFile.exists()
@@ -49,23 +50,12 @@ android {
 
     buildTypes {
         /**
-         * debug：内部走查包。
-         * 开启验证看板与行为埋点，走查人员用它收集结论。
-         */
-        debug {
-            buildConfigField("Boolean", "VALIDATION_PANEL", "true")
-        }
-
-        /**
-         * release：上架包。
+         * release：分发包。
          *
-         * VALIDATION_PANEL=false 只是第一道锁——真正保证「上架包不含埋点」的是
-         * src/release 源集：TelemetryProvider 在该源集里被替换成空实现，
-         * TelemetryStore / ValidationPanel 等类根本不参与编译。
-         * 这样「不采集」是结构性事实，而不是一个可能被改错的开关。
+         * 开启 R8 的 tree-shaking 与资源压缩，体积从约 12 MB 降到 1.3 MB。
+         * 未配置 keystore.properties 时回退到 debug 签名，保证 clone 下来即可构建。
          */
         release {
-            buildConfigField("Boolean", "VALIDATION_PANEL", "false")
             optimization {
                 enable = true
             }

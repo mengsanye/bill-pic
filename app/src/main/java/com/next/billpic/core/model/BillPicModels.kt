@@ -2,7 +2,7 @@ package com.next.billpic.core.model
 
 import android.net.Uri
 
-/** 输出格式。原型只支持 JPG / PNG 两种，这里保持一致，不做「图片互转」。 */
+/** 输出格式。只支持 JPG / PNG 两种，不做「图片互转」。 */
 enum class OutputFormat(val id: String, val ext: String, val mime: String, val label: String) {
     JPG("jpg", "jpg", "image/jpeg", "JPG"),
     PNG("png", "png", "image/png", "PNG"),
@@ -70,57 +70,11 @@ data class ConversionRecord(
     val durationMs: Long,
 )
 
-/** 用户反馈。converted 标记该用户是否真的拿到了图片——用于区分「没用懂」和「不好用」。 */
-data class FeedbackEntry(
-    val timestamp: Long,
-    val rating: Int,
-    val text: String,
-    val intent: String,
-    val converted: Boolean,
-    val formatId: String,
-    val pages: Int,
-)
-
-/** 埋点事件 */
-data class TrackedEvent(
-    val timestamp: Long,
-    val name: String,
-    val screen: String,
-    val props: Map<String, String>,
-) {
-    /** 事件流展示用：把 props 拼成 key=value, key=value */
-    val extra: String get() = props.entries.joinToString(", ") { entry -> entry.key + "=" + entry.value }
-}
-
-/** 一次试用会话。A/B 变体按会话稳定分流，便于 5 位同事各走一遍互不干扰。 */
-data class TrialSession(
-    val id: String,
-    val startedAt: Long,
-    val variant: String,
-    val events: List<TrackedEvent> = emptyList(),
-    val feedback: List<FeedbackEntry> = emptyList(),
-)
-
 /**
- * 走查数据。
+ * 用户数据：转换记录与输出偏好。
  *
- * 刻意**不含 history**——转换记录是用户自己的数据，上架包也要用；
- * 会话与事件是走查专用的，上架包里根本不存在（见 src/release 源集）。
- * 两者粒度不同、生命周期不同、合规要求也不同，混在一个快照里是上一版的隐患。
- */
-data class TelemetrySnapshot(
-    val sessions: List<TrialSession> = emptyList(),
-    val currentSessionId: String? = null,
-) {
-    val currentSession: TrialSession?
-        get() = sessions.firstOrNull { it.id == currentSessionId }
-}
-
-/**
- * 用户自己的数据。**上架包与走查包都需要**，与走查埋点严格分开存放。
- *
- * history 里含发票文件名——属个人信息，所以「我的」页必须提供清除入口，
- * 隐私说明也必须如实披露留存内容与条数。
+ * history 里含发票文件名——属个人信息，所以「我的」页提供清除入口，
+ * 隐私说明也如实披露留存内容与条数。
  */
 data class UserSnapshot(
     val history: List<ConversionRecord> = emptyList(),

@@ -110,7 +110,7 @@ fun ConvertScreen(
         Spacer(Modifier.height(24.dp))
 
         PrimaryActionButton(
-            text = state.variant,
+            text = AppConfig.PRIMARY_CTA,
             onClick = onPick,
             enabled = !state.converting && !state.parsing,
             leadingIconRes = R.drawable.ic_plus,
@@ -222,6 +222,23 @@ fun ConvertScreen(
                     )
                 }
             }
+        }
+
+        // 多页 PDF 停在这里等用户确认页码（单页已自动转换）。
+        // 主操作刻意放在设置区**下方**：顺序是「先配置、再执行」，
+        // 按钮在上方会诱导用户在没看到页码输入框之前就按下转换。
+        if (state.needsExplicitConvert) {
+            Spacer(Modifier.height(14.dp))
+            val pages = state.selectedPages
+            PrimaryActionButton(
+                text = when {
+                    pages.isEmpty() -> "开始转换"
+                    state.pageRangeInput.isBlank() -> "开始转换（全部 ${pages.size} 页）"
+                    else -> "开始转换（${pages.size} 页）"
+                },
+                onClick = onConvert,
+                enabled = pages.isNotEmpty(),
+            )
         }
 
         if (state.settingsDirty) {
