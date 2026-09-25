@@ -145,7 +145,11 @@ fun LargeTitleBar(title: String, modifier: Modifier = Modifier) {
         color = AppColor.label,
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 4.dp, bottom = 12.dp),
+            // 上间距 12dp 不是随手取的：状态栏 inset 已由 Scaffold 让出（实测 24dp），
+            // 32sp 标题行框内还有约 6dp 行距，两者相加让字形顶边落在屏幕 42dp 处 ——
+            // 与子页面返回栏（46dp 栏内居中）的内容顶边对齐，切页时页头不会跳。
+            // 这个值曾为 4dp，那是 edge-to-edge 之前的遗留，会让标题贴住状态栏。
+            .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 12.dp),
     )
 }
 
