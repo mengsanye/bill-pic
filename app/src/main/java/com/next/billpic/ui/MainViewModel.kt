@@ -1,9 +1,15 @@
 package com.next.billpic.ui
 
 import android.app.Application
+import android.app.StatusBarManager
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
+import androidx.annotation.RequiresApi
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.next.billpic.R
@@ -19,6 +25,7 @@ import com.next.billpic.core.model.PageRange
 import com.next.billpic.core.model.PdfSource
 import com.next.billpic.core.pdf.PdfConversionException
 import com.next.billpic.core.pdf.PdfConverter
+import com.next.billpic.qs.BillPicTileService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -66,6 +73,8 @@ data class MainUiState(
     val deleteRecordIndex: Int? = null,
     /** 上次转换所用的设置指纹，用来判断改了设置后要不要给「重新转换」出口 */
     val lastSignature: String = "",
+    /** 是否展示「下拉快捷入口」引导弹框（首次启动且从未展示过时为 true） */
+    val quickSettingsGuideVisible: Boolean = false,
 ) {
     val progress: Float
         get() = if (progressTotal <= 0) 0f else progressDone.toFloat() / progressTotal.toFloat()
@@ -115,11 +124,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         val user = userData.load()
+        // 首次启动（从未展示过引导）时弹一次；随即落标记，保证**只弹一次**。
+        val showGuide = !user.quickSettingsGuideShown
         _state.value = _state.value.copy(
             format = OutputFormat.fromId(user.preferredFormatId),
             scale = OutputScale.fromId(user.preferredScaleId),
             history = user.history,
+            quickSettingsGuideVisible = showGuide,
         )
+        if (showGuide) {
+            userData.save(user.copy(quickSettingsGuideShown = true))
+        }
     }
 
     private fun hud(text: String) {
@@ -152,6 +167,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _state.value = _state.value.copy(tab = tab, mineSub = MineSub.NONE, showResult = false)
     }
 
+    /**
+     * 从下拉快捷图块进入 App。
+     *
+     * 无论此前停在哪个标签页或结果页，都强制回到「转换」首页——
+     * 图块承担的就是「一步直达转换」的语义，落在别处等于没达成。
+     */
+    fun openConvertTab() {
+        _state.value = _state.value.copy(
+            tab = AppTab.CONVERT,
+            mineSub = MineSub.NONE,
+            showResult = false,
+        )
+    }
+
     fun goToResult() {
         if (_state.value.results.isEmpty()) return
         _state.value = _state.value.copy(
@@ -169,6 +198,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun handleBack(): Boolean {
         val current = _state.value
         return when {
+            current.quickSettingsGuideVisible -> {
+                dismissQuickSettingsGuide()
+                true
+            }
             current.permissionGuideVisible -> {
                 dismissPermissionGuide()
                 true
@@ -565,6 +598,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             deleteRecordIndex = null,
         )
         hud("已删除这条记录")
+    }
+
+    /* ------------------------------ 下拉快捷入口引导 ------------------------------ */
+
+    /** 当前系统是否支持「一键添加图块」（Android 13 / API 33 起提供该能力）。 */
+    fun canOneTapAddQuickTile(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    /**
+     * 请求系统弹出「添加到快捷设置」确认框（仅 Android 13+）。
+     *
+     * 这是系统提供的一键添加能力：用户确认后图块直接进入快捷面板，无需手动拖拽。
+     * 低版本没有该 API，只能靠引导图教学。
+     *
+     * 无论系统返回什么结果都收起引导——系统自身会对重复请求做限制，
+     * 应用不再自行弹窗骚扰；同时**不采集、不上报**任何结果。
+     */
+    fun requestAddQuickTile() {
+        if (canOneTapAddQuickTile()) {
+            requestAddQuickTileOnTiramisu()
+        }
+        dismissQuickSettingsGuide()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+    private fun requestAddQuickTileOnTiramisu() {
+        val context = getApplication<Application>()
+        val manager = context.getSystemService(Context.STATUS_BAR_SERVICE) as? StatusBarManager
+            ?: return
+        val component = ComponentName(context, BillPicTileService::class.java)
+        val icon = Icon.createWithResource(context, R.drawable.ic_qs_tile)
+        val ignoreResult = object : java.util.function.Consumer<Int> {
+            override fun accept(result: Int) = Unit
+        }
+        runCatching {
+            manager.requestAddTileService(
+                component,
+                context.getString(R.string.qs_tile_label),
+                icon,
+                context.mainExecutor,
+                ignoreResult,
+            )
+        }
+    }
+
+    fun dismissQuickSettingsGuide() {
+        _state.value = _state.value.copy(quickSettingsGuideVisible = false)
     }
 
     /* ------------------------------ 数据控制权 ------------------------------ */

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">BillPic</string>
+    <!-- 下拉快捷菜单图块的标签（Quick Settings Tile） -->
+    <string name="qs_tile_label">发票转图片</string>
 </resources>

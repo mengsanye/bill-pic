@@ -67,6 +67,7 @@ class UserDataStore(context: Context) {
         val root = JSONObject()
         root.put("preferredFormatId", snapshot.preferredFormatId)
         root.put("preferredScaleId", snapshot.preferredScaleId)
+        root.put("qsGuideShown", snapshot.quickSettingsGuideShown)
 
         val history = JSONArray()
         snapshot.history.forEach { record ->
@@ -106,6 +107,7 @@ class UserDataStore(context: Context) {
             history = history,
             preferredFormatId = OutputFormat.fromId(root.optString("preferredFormatId")).id,
             preferredScaleId = OutputScale.fromId(root.optString("preferredScaleId")).id,
+            quickSettingsGuideShown = root.optBoolean("qsGuideShown", false),
         )
     }
 

@@ -80,6 +80,12 @@ data class UserSnapshot(
     val history: List<ConversionRecord> = emptyList(),
     val preferredFormatId: String = OutputFormat.JPG.id,
     val preferredScaleId: String = OutputScale.STANDARD.id,
+    /**
+     * 是否已经展示过「下拉快捷入口」引导弹框。
+     *
+     * 引导只自动展示一次，避免反复打扰。此标记仅存本机，不随任何通道外传。
+     */
+    val quickSettingsGuideShown: Boolean = false,
 ) {
     companion object {
         /** 转换记录保留上限。超过后丢弃最旧的一条。 */

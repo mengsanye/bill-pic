@@ -1,0 +1,20 @@
+<!--
+  下拉快捷菜单图块图标。
+
+  系统规范：24×24dp、矢量、纯白且背景透明（图块本身会对图标着色，
+  必须用不透明纯白实心，否则在浅色／深色面板上都会发灰）。
+
+  图形与底部「转换」Tab 保持同一套「文档 → 图片」隐喻，保证识别一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M5,3h9l4,4v6h-2V8h-3V5H7v14h4v2H5V3z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M14,14h6l-6,7v-5H9l5,-2z" />
+</vector>

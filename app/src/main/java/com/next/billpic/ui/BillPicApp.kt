@@ -47,6 +47,7 @@ import com.next.billpic.ui.components.BackTitleBar
 import com.next.billpic.ui.components.HudOverlay
 import com.next.billpic.ui.components.LargeTitleBar
 import com.next.billpic.ui.components.LinkTextButton
+import com.next.billpic.ui.components.QuickSettingsGuideDialog
 import com.next.billpic.ui.components.rememberTapHaptics
 import com.next.billpic.ui.screens.AboutScreen
 import com.next.billpic.ui.screens.ConvertScreen
@@ -67,10 +68,22 @@ import kotlinx.coroutines.delay
  * 这样它们能盖住底部 Tab 栏，符合手机上「全屏弹层」的预期。
  */
 @Composable
-fun BillPicApp(viewModel: MainViewModel = viewModel()) {
+fun BillPicApp(
+    viewModel: MainViewModel = viewModel(),
+    openConvertFromTile: Boolean = false,
+    onTileOpenHandled: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val palette = AppColor
+
+    // 从下拉快捷图块进入：强制切回转换页（冷启动 / 热启动都会走到这里）。
+    LaunchedEffect(openConvertFromTile) {
+        if (openConvertFromTile) {
+            viewModel.openConvertTab()
+            onTileOpenHandled()
+        }
+    }
 
     /* ---------------- 选 PDF（系统文件选择器，不申请任何读取权限） ---------------- */
 
@@ -113,6 +126,7 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
     /* ---------------- 返回键 ---------------- */
 
     val hasOverlay = state.viewerPage != null ||
+        state.quickSettingsGuideVisible ||
         state.permissionGuideVisible ||
         state.clearHistoryVisible ||
         state.deleteRecordIndex != null ||
@@ -260,6 +274,15 @@ fun BillPicApp(viewModel: MainViewModel = viewModel()) {
             },
             onDismiss = viewModel::dismissPermissionGuide,
             dismissText = "知道了",
+        )
+    }
+
+    // 首次启动的下拉快捷入口引导（只自动展示一次，见 MainViewModel.init）
+    if (state.quickSettingsGuideVisible) {
+        QuickSettingsGuideDialog(
+            canOneTapAdd = viewModel.canOneTapAddQuickTile(),
+            onAdd = viewModel::requestAddQuickTile,
+            onDismiss = viewModel::dismissQuickSettingsGuide,
         )
     }
 }
